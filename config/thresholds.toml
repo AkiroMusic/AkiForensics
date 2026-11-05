@@ -1,0 +1,33 @@
+# AkiForensics detection thresholds
+# Calibration provenance: v0-n1 — derived from ONE confirmed case (DJ Konatal
+# "洛春赋 (电音版)", confirmed AI 2026-11-05) plus first-principles DAW physics.
+# Treat binary verdicts as evidence-weighted, not ground truth, until `calibrate`
+# has been run against a human/AI reference corpus.
+
+[meta]
+version = "v0-n1"
+
+[beatgrid]
+residual_std_ai_ms = 1.5        # grid residual std above this => generative-grade wander
+residual_std_human_ms = 0.6     # below this => sample-locked (quantized DAW render)
+pct03_human_min = 70.0          # % of beats within +-0.3 ms expected for sample-locked
+pct03_ai_max = 30.0             # % within +-0.3 ms above which AI-consistency weakens
+min_kicks = 40                  # refined beats required to judge the timing leg
+min_coverage = 0.40             # refined beats must span this fraction of the track
+common_edm_bpm = [120, 124, 126, 128, 130, 132, 134, 136, 138, 140, 142, 144, 145, 150, 160, 170, 174, 175]
+
+[spectral]
+band_max_lo_hz = 14000          # band used as "clean HF reference" for the cliff test
+band_max_hi_hz = 20000
+cliff_delta_db = 30.0           # vertical drop required to call a brick wall
+cutoff_fake_max_hz = 20800      # wall below this + cliff => lossy-source fingerprint
+digital_silence_db = -100.0     # above-wall level treated as digital silence
+noise_bed_lo_hz = 16000
+noise_bed_hi_hz = 19500
+
+[verdict]
+# Convergence weights; timing (leg A) is the only discriminative-on-audio leg,
+# spectral/metadata are delivery-chain evidence.
+weight_beatgrid = 0.5
+weight_spectral = 0.3
+weight_metadata = 0.2

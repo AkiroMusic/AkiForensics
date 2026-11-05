@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tool outputs
+forensics_out/
+*.report.html
+!tests/golden/*.html
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
