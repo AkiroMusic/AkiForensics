@@ -1,6 +1,6 @@
 # AkiForensics detection thresholds
-# Calibration provenance: v0-n1 — derived from ONE confirmed case (DJ Konatal
-# "洛春赋 (电音版)", confirmed AI 2026-11-05) plus first-principles DAW physics.
+# Calibration provenance: v0-n1 — derived from ONE confirmed AI case
+# (private reference sample, 2026-11-05) plus first-principles DAW physics.
 # Treat binary verdicts as evidence-weighted, not ground truth, until `calibrate`
 # has been run against a human/AI reference corpus.
 

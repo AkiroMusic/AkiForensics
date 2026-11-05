@@ -55,16 +55,21 @@ python -m akiforensics analyze track.flac --config config/thresholds.toml
 python run_tests.py -v
 ```
 
-Synthetic fixtures prove each leg measures what it claims: a sample-locked 128 BPM kick grid grades `human_consistent` (std ≈ 0.1 ms); the same grid with ±3 ms jitter + slow wander grades `ai_consistent`; a 20.5 kHz brick wall inside FLAC grades `ai_consistent` (and `N/A` inside MP3). An integration test against the original confirmed case runs automatically when the file is present at the default path or via `AKIFORENSICS_CASE_FILE`.
+Synthetic fixtures prove each leg measures what it claims: a sample-locked 128 BPM kick grid grades `human_consistent` (std ≈ 0.1 ms); the same grid with ±3 ms jitter + slow wander grades `ai_consistent`; a 20.5 kHz brick wall inside FLAC grades `ai_consistent` (and `N/A` inside MP3). A corpus-driven integration test activates when you point it at a confirmed sample:
 
-合成 fixtures 验证每条链测的就是它声称的：采样级锁定 128 BPM 底鼓网格判 `human_consistent`（std ≈ 0.1 ms）；同网格加 ±3 ms 抖动+慢游移判 `ai_consistent`；FLAC 内 20.5 kHz 砖墙判 `ai_consistent`（MP3 内则正确报 `N/A`）。确认案例的集成测试在文件存在于默认路径或 `AKIFORENSICS_CASE_FILE` 指向时自动运行。
+```bash
+AKIFORENSICS_CASE_FILE="D:\refs\confirmed_ai\track.flac" python run_tests.py -v   # must not grade human-side
+AKIFORENSICS_CASE_FILE="D:\refs\confirmed_human\track.flac" AKIFORENSICS_EXPECT=human python run_tests.py -v
+```
+
+合成 fixtures 验证每条链测的就是它声称的：采样级锁定 128 BPM 底鼓网格判 `human_consistent`（std ≈ 0.1 ms）；同网格加 ±3 ms 抖动+慢游移判 `ai_consistent`；FLAC 内 20.5 kHz 砖墙判 `ai_consistent`（MP3 内则正确报 `N/A`）。语料驱动的集成测试：把 `AKIFORENSICS_CASE_FILE` 指向任一已确认样本（文件名任意）即自动启用，断言引擎不作出反向判定（`AKIFORENSICS_EXPECT=human` 用于已确认人类样本）。
 
 ## Calibration status · 校准状态
 
-- `v0-n1` (current): thresholds from one confirmed case (DJ Konatal "洛春赋 (电音版)", confirmed AI 2026-11-05) + DAW physics first principles. Human-side bounds are generous to avoid false accusations.
+- `v0-n1` (current): thresholds from one confirmed AI case (private reference sample, 2026-11-05) + DAW physics first principles. Human-side bounds are generous to avoid false accusations.
 - Next: render a human reference set from your own DAW (quantized / unquantized, several tempi) and collect known AI output, then `calibrate` → bump threshold version.
 
-- `v0-n1`（当前）：阈值来自单一确认案例（DJ Konatal《洛春赋 (电音版)》，2026-11-05 确认 AI）+ DAW 物理第一性原理。人类侧阈值刻意放宽以避免冤枉真人作品。
+- `v0-n1`（当前）：阈值来自单一已确认 AI 案例（私有参考样本，2026-11-05）+ DAW 物理第一性原理。人类侧阈值刻意放宽以避免冤枉真人作品。
 - 下一步：用你自己的 DAW 渲染人类参考集（量化/不量化、多个速度），收集已知 AI 曲，跑 `calibrate` → 升级阈值版本号。
 
 ## Known limits · 已知局限
