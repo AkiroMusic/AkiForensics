@@ -63,13 +63,14 @@ def _fit_grid(kt: np.ndarray, T: float, ph: float, tol_ms: float = 35.0,
 
 
 def _xcorr_refine(kb: np.ndarray, sr: int, ks: np.ndarray,
-                  T: float, ph: float) -> tuple[np.ndarray, np.ndarray]:
+                  T: float, ph: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Re-measure each beat by waveform alignment against a reference kick.
 
     Segments are cut at GRID positions (not detected onsets): a segment then
     contains its kick at offset win_pre + (true_time - grid_time), so the
     correlation lag isolates the true timing jitter. Cutting at detected
     onsets would cancel the jitter and collapse residuals to ~0.
+    Returns (beat_indices, refined_times, correlation_qualities).
     """
     win_pre, win_post = int(0.02 * sr), int(0.13 * sr)
     segs, ks_ok = [], []
@@ -81,7 +82,7 @@ def _xcorr_refine(kb: np.ndarray, sr: int, ks: np.ndarray,
             segs.append(seg)
             ks_ok.append(k)
     if len(segs) < 10:
-        return np.asarray(ks), (ph + np.asarray(ks) * T)
+        return np.asarray(ks), (ph + np.asarray(ks) * T), np.array([])
     segs = np.asarray(segs)
     ks_ok = np.asarray(ks_ok)
     ref = segs[int(np.argmax([np.abs(s).max() for s in segs]))]
@@ -101,8 +102,8 @@ def _xcorr_refine(kb: np.ndarray, sr: int, ks: np.ndarray,
     lags, quals = np.asarray(lags), np.asarray(quals)
     good = quals > 0.6
     if good.sum() < 10:
-        return ks_ok, (ph + ks_ok * T)
-    return ks_ok[good], (ph + ks_ok[good] * T) + lags[good] / 1000.0
+        return ks_ok, (ph + ks_ok * T), quals
+    return ks_ok[good], (ph + ks_ok[good] * T) + lags[good] / 1000.0, quals[good]
 
 
 def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
@@ -123,7 +124,7 @@ def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
         na["reason"] = "grid fit collapsed"
         return na
 
-    ks_r, t_ref = _xcorr_refine(kb, sr, ks, T, ph)
+    ks_r, t_ref, quals = _xcorr_refine(kb, sr, ks, T, ph)
     for _ in range(5):
         T2, p2 = np.polyfit(ks_r, t_ref, 1)
         res = (t_ref - (p2 + ks_r * T2)) * 1000.0
@@ -136,6 +137,21 @@ def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
     bpm = 60.0 / T2
     span = (ks_r.max() - ks_r.min()) * T2
     coverage = span / duration if duration else 0.0
+    t_abs = p2 + ks_r * T2
+
+    # local tempo drift: per-20s-window linear fit -> BPM curve
+    local_bpms = []
+    for w0 in np.arange(t_abs.min(), max(t_abs.max() - 20.0, t_abs.min()), 20.0):
+        m = (t_abs >= w0) & (t_abs < w0 + 20.0)
+        if m.sum() >= 8:
+            Tw, _ = np.polyfit(ks_r[m], t_abs[m], 1)
+            local_bpms.append(60.0 / Tw)
+    drift_bpm = float(max(local_bpms) - min(local_bpms)) if len(local_bpms) >= 2 else 0.0
+
+    # confidence: waveform-match quality + share of expected beats actually found
+    onset_conf = float(np.mean(quals)) if len(quals) else None
+    expected = int(round(span / T2)) + 1 if span > 0 else 0
+    hit_rate = float(len(ks_r) / expected) if expected else None
 
     ma = np.convolve(res, np.ones(8) / 8, "same")
     dist_int = min(abs(bpm - b) for b in cfg.get("common_edm_bpm", []))
@@ -157,6 +173,10 @@ def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
         "pct_within_1ms": round(float(np.mean(np.abs(res) < 1.0) * 100), 1),
         "pct_within_2ms": round(float(np.mean(np.abs(res) < 2.0) * 100), 1),
         "wander_8beat_range_ms": round(float(ma.max() - ma.min()), 3),
-        "_plotdata": {"beat_index": ks_r, "residual_ms": res},
+        "local_bpm_drift": round(drift_bpm, 4),
+        "onset_confidence": None if onset_conf is None else round(onset_conf, 3),
+        "grid_hit_rate": None if hit_rate is None else round(hit_rate, 3),
+        "_plotdata": {"beat_index": ks_r, "residual_ms": res,
+                      "beat_times": np.round(t_abs, 4)},
     }
     return out

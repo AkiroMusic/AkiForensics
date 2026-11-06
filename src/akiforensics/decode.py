@@ -51,12 +51,20 @@ def decode_pcm(path: str, sample_rate: int | None = None,
     return proc.stdout
 
 
-def decode_work(path: str, sample_rate: int = 44100) -> tuple[int, np.ndarray]:
-    """Decode to float64 mono at `sample_rate` for analysis pipelines."""
+def decode_work(path: str, sample_rate: int | None = None) -> tuple[int, np.ndarray]:
+    """Decode to float64 mono for analysis pipelines.
+
+    sample_rate=None keeps the NATIVE rate (preferred: resampling manufactures
+    artifacts the forensic legs would then measure). The caller learns the
+    effective rate from ffprobe and passes it back explicitly.
+    """
     raw = decode_pcm(path, sample_rate=sample_rate, channels=2, sample_fmt="s16le")
     x = np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
     x = x.reshape(-1, 2).mean(axis=1)
-    return sample_rate, x
+    if sample_rate is None:
+        raise ValueError("decode_work needs the effective sample rate; "
+                         "pass the stream's rate from probe()")
+    return int(sample_rate), x
 
 
 def decode_errors(path: str) -> list[str]:

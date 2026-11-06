@@ -1,8 +1,8 @@
 # AkiForensics
 
-**Forensic toolkit for detecting AI-generated music (Suno-style) from the audio file itself** — three evidence legs (beat-grid timing / lossy-cutoff fingerprint / metadata chain), graded verdicts, bilingual HTML reports. No listening required for a first pass.
+**Forensic toolkit for detecting AI-generated music (Suno-style) from the audio file itself** — three automated evidence legs, graded verdicts, bilingual HTML reports, and a human-in-the-loop task-card protocol (iZotope RX 12 / UVR5 / Pure Analyzer) for evidence the engine can't reach.
 
-**AI 生成音乐取证工具** —— 从音频文件本身鉴别 Suno 类生成式模型直出的曲子：三条证据链（节拍网格时序 / 有损截止指纹 / 元数据链），分级判定，双语 HTML 报告，首轮筛查无需试听。
+**AI 生成音乐取证工具** —— 三条自动化证据链（节拍网格时序 / 有损截止指纹 / 元数据链）、分级判定、双语 HTML 报告，外加人工在环任务卡协议（iZotope RX 12 / UVR5 / Pure Analyzer）：AI 发卡 → 真人执行 → 回传数值与截图 → AI 双轨合并。
 
 > **Honesty note** · Thresholds `v0-n1` are calibrated on a single confirmed case. Verdicts are evidence-weighted, not ground truth. Run `calibrate` against a human/AI reference corpus before relying on binary calls.
 >
@@ -20,9 +20,15 @@ Three independent evidence legs, graded and converged:
 | **B · Spectral fingerprint** 频谱 | Brick-wall cutoff + codec noise bed inside a nominally lossless container ⇒ lossy-source (fake lossless) fingerprint, e.g. LAME MP3 320's 20.5 kHz wall. | Delivery-chain evidence |
 | **C · Metadata chain** 元数据 | FLAC block inventory, STREAMINFO MD5 integrity, cover MIME mismatches, platform farm tags (KuGou etc.), decoder errors. | Circumstantial |
 
-Verdicts: `STRONG_AI_EVIDENCE` / `LIKELY_AI` / `LIKELY_AI_DELIVERY_ONLY` / `WEAK_AI_EVIDENCE` / `LIKELY_HUMAN` / `INCONCLUSIVE`. The timing leg is genre-gated: tracks without a steady kick grid report `N/A` for leg A instead of a guess.
+Verdicts: `STRONG_AI_EVIDENCE` / `LIKELY_AI` / `LIKELY_HUMAN` / `DELIVERY_CHAIN_ANOMALY` / `INCONCLUSIVE`. Design rules (docs/evidence-model.md): legs report measurements, not attributions; delivery-chain findings fuse as ONE correlated vote; absence of anomalies is never positive evidence. The timing leg is genre-gated: tracks without a steady kick grid report `N/A` for leg A instead of a guess.
 
-判定等级：`STRONG_AI_EVIDENCE`（强 AI 特征）/ `LIKELY_AI`（倾向 AI）/ `LIKELY_AI_DELIVERY_ONLY`（仅交付链证据）/ `WEAK_AI_EVIDENCE`（弱证据）/ `LIKELY_HUMAN`（倾向人类）/ `INCONCLUSIVE`（证据不足）。时序链按曲风门控：无稳定底鼓网格的曲子 A 链报 `N/A`，不硬判。
+判定等级：`STRONG_AI_EVIDENCE`（强 AI 特征）/ `LIKELY_AI`（倾向 AI）/ `LIKELY_HUMAN`（倾向人类）/ `DELIVERY_CHAIN_ANOMALY`（仅交付链异常，归因保留）/ `INCONCLUSIVE`（证据不足）。设计原则（docs/evidence-model.md）：证据链只报测量不作归因；交付链发现按相关性合票；无异常永远不是正向证据。时序链按曲风门控：无稳定底鼓网格的曲子 A 链报 `N/A`，不硬判。
+
+## Human-in-the-loop · 人工在环
+
+When the automated legs leave a verdict-moving gap, the engine emits **task cards** (protocol 1.0, `src/akiforensics/tasks.py`): deterministic segments computed from detected features, fixed tool settings, falsifiable acceptance criteria, and **blinding by default** — cards never contain the engine's own numbers, so the human measures independently and comparison happens afterwards on both records (dual-track merge; neither side overwrites the other). Cards target iZotope RX 12 (cutoff verification, kick inspection), structured listening checklists, and stage-2 UVR5 stem separation / Pure Analyzer profiling on demand. Protocol: `docs/HUMAN_WORKFLOW.md`.
+
+当自动链留下足以改变判定的证据缺口时，引擎生成**任务卡**（协议 1.0）：分段由检出特征算出（禁人工挑选）、工具参数写死、验收标准可证伪，且**默认盲化**——卡内不含引擎自己的测量值，人工独立测量后双轨比对（互不覆盖）。任务族覆盖 iZotope RX 12（截止验证、kick 检查）、结构化听检清单，以及按需的 UVR5 分离 / Pure Analyzer 画像（阶段 2）。协议全文：`docs/HUMAN_WORKFLOW.md`。
 
 ## Requirements · 环境要求
 
@@ -86,8 +92,10 @@ AKIFORENSICS_CASE_FILE="D:\refs\confirmed_human\track.flac" AKIFORENSICS_EXPECT=
 
 ```
 config/thresholds.toml    thresholds + provenance 阈值与校准来源
-src/akiforensics/         engine: decode / metadata / spectral / beatgrid / verdict / report / cli / calibrate
-tests/                    synthetic fixtures + unit + confirmed-case integration
+src/akiforensics/         engine: decode / metadata / spectral / beatgrid / verdict / tasks / report / cli / calibrate
+tests/                    synthetic fixtures + unit + corpus-driven integration
+docs/evidence-model.md    vocabulary, fusion rules, verdict table 证据模型
+docs/HUMAN_WORKFLOW.md    human task protocol 人工任务协议（RX12/UVR5/听检/PureAnalyzer）
 skill/SKILL.md            ZCode skill wrapper (not registered globally; local to this repo)
 release/                  packaged versions
 run_tests.py              stdlib test runner

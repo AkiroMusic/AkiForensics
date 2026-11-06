@@ -1,4 +1,9 @@
-"""Unit tests for the three forensic legs on synthetic known-property audio."""
+"""Unit tests for the forensic legs on synthetic known-property audio.
+
+Vocabulary v2: legs report measurements (timing_locked / timing_variation /
+no_anomaly_detected / lossy_source_fingerprint); source attribution happens
+only in verdict.aggregate with correlated delivery-chain evidence fused.
+"""
 
 from __future__ import annotations
 
@@ -28,10 +33,10 @@ class BeatGridTests(unittest.TestCase):
                                           jitter_ms=0, wander_ms=0)
         cls.jittered = fx.render_kick_track(cls.fx.dir / "jittered.wav", bpm=128,
                                             jitter_ms=3.0, wander_ms=2.0)
-        _, m_lock = decode.decode_work(str(cls.locked))
-        _, m_jit = decode.decode_work(str(cls.jittered))
-        cls.res_lock = beatgrid.analyze(m_lock, 44100, CFG["beatgrid"])
-        cls.res_jit = beatgrid.analyze(m_jit, 44100, CFG["beatgrid"])
+        sr_l, m_lock = decode.decode_work(str(cls.locked), sample_rate=44100)
+        sr_j, m_jit = decode.decode_work(str(cls.jittered), sample_rate=44100)
+        cls.res_lock = beatgrid.analyze(m_lock, sr_l, CFG["beatgrid"])
+        cls.res_jit = beatgrid.analyze(m_jit, sr_j, CFG["beatgrid"])
 
     @classmethod
     def tearDownClass(cls):
@@ -44,9 +49,17 @@ class BeatGridTests(unittest.TestCase):
         self.assertGreater(r["pct_within_0.3ms"], 70.0)
         self.assertAlmostEqual(r["bpm"], 128.0, delta=0.1)
 
-    def test_locked_grades_human(self):
+    def test_locked_reports_confidence_metrics(self):
+        r = self.res_lock
+        self.assertIsNotNone(r["onset_confidence"])
+        self.assertGreater(r["onset_confidence"], 0.6)
+        self.assertIsNotNone(r["grid_hit_rate"])
+        self.assertLess(r["local_bpm_drift"], 0.05)
+
+    def test_locked_grades_timing_locked(self):
         g = verdict._grade_beatgrid(self.res_lock, CFG)
-        self.assertEqual(g["verdict"], "human_consistent")
+        self.assertEqual(g["verdict"], "timing_locked")
+        self.assertIn("quantized DAW", g["interpretation_en"])
 
     def test_jittered_grid_shows_generative_wander(self):
         r = self.res_jit
@@ -55,9 +68,10 @@ class BeatGridTests(unittest.TestCase):
         self.assertLess(r["pct_within_0.3ms"], 30.0)
         self.assertAlmostEqual(r["bpm"], 128.0, delta=0.1)
 
-    def test_jittered_grades_ai(self):
+    def test_jittered_grades_timing_variation(self):
         g = verdict._grade_beatgrid(self.res_jit, CFG)
-        self.assertEqual(g["verdict"], "ai_consistent")
+        self.assertEqual(g["verdict"], "timing_variation")
+        self.assertIn("unquantized live playing", g["interpretation_en"])
 
 
 class SpectralTests(unittest.TestCase):
@@ -66,10 +80,10 @@ class SpectralTests(unittest.TestCase):
         cls.fx = fx.FixtureDir()
         cls.full = fx.render_band_noise(cls.fx.dir / "full.wav", cutoff_hz=None)
         cls.walled = fx.render_band_noise(cls.fx.dir / "walled.wav", cutoff_hz=20500)
-        _, m_full = decode.decode_work(str(cls.full))
-        _, m_walled = decode.decode_work(str(cls.walled))
-        cls.res_full = spectral.analyze(m_full, 44100, CFG["spectral"])
-        cls.res_walled = spectral.analyze(m_walled, 44100, CFG["spectral"])
+        sr_f, m_full = decode.decode_work(str(cls.full), sample_rate=44100)
+        sr_w, m_walled = decode.decode_work(str(cls.walled), sample_rate=44100)
+        cls.res_full = spectral.analyze(m_full, sr_f, CFG["spectral"])
+        cls.res_walled = spectral.analyze(m_walled, sr_w, CFG["spectral"])
 
     @classmethod
     def tearDownClass(cls):
@@ -79,9 +93,10 @@ class SpectralTests(unittest.TestCase):
         self.assertIsNone(self.res_full["cutoff_hz"])
         self.assertFalse(self.res_full["brick_wall"])
 
-    def test_full_band_grades_human(self):
-        g = verdict._grade_spectral(self.res_full, "wav", CFG)
-        self.assertEqual(g["verdict"], "human_consistent")
+    def test_full_band_is_no_anomaly_not_human(self):
+        g = verdict._grade_spectral(self.res_full, "flac", CFG)
+        self.assertEqual(g["verdict"], "no_anomaly_detected")
+        self.assertIn("not source-diagnostic", g["why"])
 
     def test_brick_wall_detected_at_20k5(self):
         s = self.res_walled
@@ -90,9 +105,9 @@ class SpectralTests(unittest.TestCase):
         self.assertLessEqual(s["cutoff_hz"], 20650)
         self.assertGreaterEqual(s["cutoff_hz"], 20300)
 
-    def test_wall_in_lossless_container_grades_ai(self):
+    def test_wall_in_lossless_container_is_fingerprint(self):
         g = verdict._grade_spectral(self.res_walled, "flac", CFG)
-        self.assertEqual(g["verdict"], "ai_consistent")
+        self.assertEqual(g["verdict"], "lossy_source_fingerprint")
 
     def test_wall_in_lossy_container_is_na(self):
         g = verdict._grade_spectral(self.res_walled, "mp3", CFG)
@@ -100,38 +115,50 @@ class SpectralTests(unittest.TestCase):
 
 
 class VerdictAggregationTests(unittest.TestCase):
+    def _bg(self, std, pct03, applicable=True):
+        return {"applicable": applicable, "reason": None if applicable else "no kicks",
+                "residual_std_ms": std, "pct_within_0.3ms": pct03,
+                "bpm": 128.0, "bpm_integer_distance": 0.0}
+
+    def _sp(self, wall, cutoff):
+        return {"brick_wall": wall, "cutoff_hz": cutoff,
+                "cliff_depth_db": 37.0 if wall else None}
+
     def _meta(self, flags):
         return {"flags": flags, "platform_fingerprint": [], "vendor": "x",
                 "container": "flac"}
 
-    def test_strong_ai(self):
-        bg = {"applicable": True, "residual_std_ms": 2.3,
-              "pct_within_0.3ms": 7.0, "bpm": 135.97, "bpm_integer_distance": 0.03}
-        sp = {"fake_lossless_suspect": True, "cutoff_hz": 20462,
-              "brick_wall": True, "cliff_depth_db": 37.0}
+    def test_strong_ai_timing_plus_delivery(self):
         out = verdict.aggregate(self._meta(["picture_mime_mismatch", "decoder_errors"]),
-                                sp, bg, "flac", CFG)
+                                self._sp(True, 20462), self._bg(2.3, 7.0), "flac", CFG)
         self.assertEqual(out["verdict"], "STRONG_AI_EVIDENCE")
+        self.assertTrue(out["delivery_chain_fused"])
 
-    def test_likely_human(self):
-        bg = {"applicable": True, "residual_std_ms": 0.3,
-              "pct_within_0.3ms": 95.0, "bpm": 128.0, "bpm_integer_distance": 0.0}
-        sp = {"fake_lossless_suspect": False, "cutoff_hz": None, "brick_wall": False}
-        out = verdict.aggregate(self._meta([]), sp, bg, "flac", CFG)
-        self.assertEqual(out["verdict"], "LIKELY_HUMAN")
-
-    def test_timing_only_likely_ai(self):
-        bg = {"applicable": True, "residual_std_ms": 2.0,
-              "pct_within_0.3ms": 10.0, "bpm": 128.3, "bpm_integer_distance": 0.3}
-        sp = {"fake_lossless_suspect": False, "cutoff_hz": None, "brick_wall": False}
-        out = verdict.aggregate(self._meta([]), sp, bg, "flac", CFG)
+    def test_likely_ai_timing_only(self):
+        out = verdict.aggregate(self._meta([]), self._sp(False, None),
+                                self._bg(2.0, 10.0), "flac", CFG)
         self.assertEqual(out["verdict"], "LIKELY_AI")
 
-    def test_inconclusive_when_timing_na(self):
-        bg = {"applicable": False, "reason": "no kicks"}
-        sp = {"fake_lossless_suspect": False, "cutoff_hz": None, "brick_wall": False}
-        out = verdict.aggregate(self._meta([]), sp, bg, "flac", CFG)
+    def test_likely_human_requires_positive_everywhere(self):
+        out = verdict.aggregate(self._meta([]), self._sp(False, None),
+                                self._bg(0.3, 95.0), "flac", CFG)
+        self.assertEqual(out["verdict"], "LIKELY_HUMAN")
+
+    def test_no_cutoff_alone_is_not_human(self):
+        # full-band spectrum + no timing evidence => nothing to say
+        out = verdict.aggregate(self._meta([]), self._sp(False, None),
+                                self._bg(0.0, 0.0, applicable=False), "flac", CFG)
         self.assertEqual(out["verdict"], "INCONCLUSIVE")
+
+    def test_delivery_chain_alone_does_not_attribute(self):
+        out = verdict.aggregate(self._meta([]), self._sp(True, 20462),
+                                self._bg(0.0, 0.0, applicable=False), "flac", CFG)
+        self.assertEqual(out["verdict"], "DELIVERY_CHAIN_ANOMALY")
+
+    def test_metadata_anomaly_fuses_into_delivery_vote(self):
+        out = verdict.aggregate(self._meta(["md5_mismatch"]), self._sp(False, None),
+                                self._bg(0.0, 0.0, applicable=False), "flac", CFG)
+        self.assertEqual(out["verdict"], "DELIVERY_CHAIN_ANOMALY")
 
 
 if __name__ == "__main__":

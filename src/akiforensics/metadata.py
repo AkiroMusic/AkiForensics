@@ -87,30 +87,41 @@ def analyze(path: str, probe_info: dict | None = None) -> dict:
         "flags": [],
     }
     if audio and audio.get("codec_name") == "flac":
-        with open(path, "rb") as f:
-            head = f.read(4_000_000)
-        if not head.startswith(FLAC_MAGIC):
-            return out
-        blocks: list[tuple[int, bytes]] = []
-        pos, last = 4, False
-        while not last and pos + 4 <= len(head):
-            hdr = head[pos:pos + 4]
-            last = bool(hdr[0] & 0x80)
-            btype = hdr[0] & 0x7F
-            blen = int.from_bytes(hdr[1:4], "big")
-            blocks.append((btype, head[pos + 4:pos + 4 + blen]))
-            pos += 4 + blen
-        inv = [BLOCK_NAMES.get(t, t) for t, _ in blocks]
-        flac: dict = {"blocks": inv, "vendor": None, "tags": {}}
-        for t, payload in blocks:
-            if t == 0:
-                si = _parse_streaminfo(payload)
-                flac.update(si)
-                flac["md5_check"] = verify_flac_md5(path, si)
-            elif t == 4:
-                flac.update({k: v for k, v in _parse_vorbis_comment(payload).items()})
-            elif t == 6:
-                flac["picture"] = _picture_info(payload)
+        flac: dict = {"blocks": [], "vendor": None, "tags": {}}
+        try:
+            with open(path, "rb") as f:
+                if f.read(4) != FLAC_MAGIC:
+                    return out
+                f.seek(4)  # skip fLaC magic
+                last = False
+                n_blocks = 0
+                while not last and n_blocks < 128:
+                    hdr = f.read(4)
+                    if len(hdr) < 4:
+                        break
+                    last = bool(hdr[0] & 0x80)
+                    btype = hdr[0] & 0x7F
+                    blen = int.from_bytes(hdr[1:4], "big")
+                    n_blocks += 1
+                    if blen > 64_000_000:  # absurd block => corrupt/hostile
+                        flac["blocks"].append(f"OVERSIZED({btype},{blen})")
+                        out["flags"].append("metadata_block_oversized")
+                        break
+                    payload = f.read(blen)
+                    if len(payload) < blen:
+                        out["flags"].append("metadata_truncated")
+                        break
+                    flac["blocks"].append(BLOCK_NAMES.get(btype, f"type{btype}"))
+                    if btype == 0 and len(payload) == 34:
+                        si = _parse_streaminfo(payload)
+                        flac.update(si)
+                        flac["md5_check"] = verify_flac_md5(path, si)
+                    elif btype == 4:
+                        flac.update({k: v for k, v in _parse_vorbis_comment(payload).items()})
+                    elif btype == 6:
+                        flac["picture"] = _picture_info(payload)
+        except OSError as e:
+            out["flags"].append("metadata_read_error")
         out["flac"] = flac
 
         tags_u = {k.upper(): v for k, v in flac.get("tags", {}).items()}
@@ -124,7 +135,7 @@ def analyze(path: str, probe_info: dict | None = None) -> dict:
         if "QUALITY" in tags_u and tags_u["QUALITY"].lower() in ("flac", "lossless"):
             # platform self-declares lossless; truthfulness is spectral leg's job
             out["flags"].append("platform_quality_tag_present")
-        if "SEEKTABLE" in inv:
+        if "SEEKTABLE" in flac["blocks"]:
             errs = decode.decode_errors(path)
             if errs:
                 out["flags"].append("decoder_errors")

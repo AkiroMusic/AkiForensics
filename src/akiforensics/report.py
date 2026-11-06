@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import base64
 import csv
+import html as _html
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -49,8 +49,7 @@ def render_plots(result: dict, outdir: str | Path) -> dict[str, str]:
         ax.set_xlabel("Hz"); ax.set_ylabel("dB")
         co = result["spectral"].get("cutoff_hz")
         if co:
-            ax.axvline(co, color="r", ls="--", lw=0.9,
-                       label=f"cutoff {co:.0f} Hz")
+            ax.axvline(co, color="r", ls="--", lw=0.9, label=f"cutoff {co:.0f} Hz")
             ax.legend()
         fig.tight_layout(); fig.savefig(outdir / "avg_spectrum.png", dpi=120); plt.close(fig)
         paths["avg_spectrum"] = str(outdir / "avg_spectrum.png")
@@ -91,6 +90,26 @@ def _img64(path: str) -> str:
         return base64.b64encode(f.read()).decode()
 
 
+_VERDICT_ZH = {
+    "STRONG_AI_EVIDENCE": "强 AI 特征（时序变异 + 交付链异常收敛）",
+    "LIKELY_AI": "倾向 AI 生成（音频内在时序证据）",
+    "DELIVERY_CHAIN_ANOMALY": "仅交付链异常（无时序证据，不判来源）",
+    "LIKELY_HUMAN": "倾向人类制作（正向一致性证据，非证明）",
+    "INCONCLUSIVE": "证据不足，无法判定",
+}
+_LEG_ZH = {
+    "timing_locked": "时序锁定（正向：符合量化渲染）",
+    "timing_variation": "时序变异（需归因）",
+    "timing_inconclusive": "时序不确定",
+    "lossy_source_fingerprint": "有损源指纹",
+    "no_anomaly_detected": "无异常（非来源诊断）",
+    "anomalies_present": "存在异常",
+    "clean": "干净", "na": "不适用", "inconclusive": "不确定",
+}
+_LEG_BAD = {"timing_variation", "lossy_source_fingerprint", "anomalies_present"}
+_LEG_GOOD = {"timing_locked", "clean"}
+
+
 def console_summary(result: dict) -> str:
     v = result["verdict"]
     lines = [
@@ -98,6 +117,7 @@ def console_summary(result: dict) -> str:
         f"AKIFORENSICS  {result['file']['path']}",
         "=" * 62,
         f"VERDICT : {v['verdict']}   (thresholds {v['threshold_version']})",
+        f"  basis : {v['positive_evidence']}",
         f"  legs  : beatgrid={v['legs']['beatgrid']['verdict']}"
         f"  spectral={v['legs']['spectral']['verdict']}"
         f"  metadata={v['legs']['metadata']['verdict']}",
@@ -106,7 +126,8 @@ def console_summary(result: dict) -> str:
     if b.get("applicable"):
         lines += [
             f"  timing: bpm={b['bpm']}  residual_std={b['residual_std_ms']} ms"
-            f"  <0.3ms={b['pct_within_0.3ms']}%  int_dist={b['bpm_integer_distance']}",
+            f"  <0.3ms={b['pct_within_0.3ms']}%  int_dist={b['bpm_integer_distance']}"
+            f"  drift={b.get('local_bpm_drift')} BPM  conf={b.get('onset_confidence')}",
         ]
     else:
         lines.append(f"  timing: N/A ({b.get('reason')})")
@@ -115,21 +136,41 @@ def console_summary(result: dict) -> str:
                  f"  noise_bed_std={s.get('noise_bed_std_db')} dB")
     m = result["metadata"]
     lines.append(f"  metadata: flags={m.get('flags') or 'none'}  vendor={m.get('vendor')}")
+    for t in result.get("manual_tasks", []):
+        lines.append(f"  TASK ▶ {t['task_id']} [{t['tool']['name']}] "
+                     f"{t['segment']['start_s']}–{t['segment']['end_s']}s "
+                     f"blinded={t['blinded']}  gap: {t['evidence_gap']}")
     lines.append(f"  NOTE  : {v['disclaimer']}")
     lines.append("=" * 62)
     return "\n".join(lines)
 
 
-_VERDICT_ZH = {
-    "STRONG_AI_EVIDENCE": "强 AI 特征（三链收敛）",
-    "LIKELY_AI": "倾向 AI 生成（时序证据）",
-    "LIKELY_AI_DELIVERY_ONLY": "倾向 AI（仅交付链证据，无时序证据）",
-    "WEAK_AI_EVIDENCE": "弱 AI 证据",
-    "LIKELY_HUMAN": "倾向人类制作",
-    "INCONCLUSIVE": "证据不足，无法判定",
-}
-_LEG_ZH = {"ai_consistent": "符合 AI 特征", "human_consistent": "符合人类特征",
-           "inconclusive": "不确定", "na": "不适用", "suspicious": "可疑", "clean": "干净"}
+def _leg_badge(leg_v: str) -> str:
+    cls = "bad" if leg_v in _LEG_BAD else ("good" if leg_v in _LEG_GOOD else "")
+    zh = _LEG_ZH.get(leg_v, leg_v)
+    return f"<span class='{cls}'>{_html.escape(leg_v)}</span><br><span class='zh'>{zh}</span>"
+
+
+def _tasks_html(tasks_list: list[dict]) -> str:
+    if not tasks_list:
+        return ("<p class='zh'>本轮无待办人工任务（无足以改变判定的证据缺口）。</p>"
+                "<p>No pending manual tasks this round (no verdict-moving evidence gaps).</p>")
+    rows = ""
+    for t in tasks_list:
+        rec = "; ".join(f"<code>{_html.escape(k)}</code>: {_html.escape(str(v))}"
+                        for k, v in t["record_fields"].items())
+        rows += f"""<tr><td><b>{_html.escape(t['task_id'])}</b><br>
+<span class="zh">盲化 {"开" if t['blinded'] else "关"}</span></td>
+<td>{_html.escape(t['tool']['name'])}<br><span class="zh">{_html.escape(t['tool']['module'])}</span></td>
+<td>{t['segment']['start_s']} – {t['segment']['end_s']} s</td>
+<td class="zh">{_html.escape(t['hypothesis_zh'])}</td>
+<td class="zh">{_html.escape(t['evidence_gap'])}</td>
+<td>{rec}</td></tr>"""
+    head = ("全步骤见 <code>docs/HUMAN_WORKFLOW.md</code>；执行后把数值表与截图回传给 AI 会话，"
+            "按双轨合并规则入库（人工记录永不覆盖引擎测量）。<br>"
+            "Full steps in <code>docs/HUMAN_WORKFLOW.md</code>; return the number sheet + "
+            "screenshots to the AI session for dual-track evidence merging.")
+    return f"<p class='zh'>{head}</p><table><tr><th>Task / 盲化</th><th>Tool 工具</th><th>Segment 分段 (s)</th><th>Hypothesis 假设</th><th>Evidence gap 证据缺口</th><th>Record 需回传</th></tr>{rows}</table>"
 
 
 def render_html(result: dict, outdir: str | Path) -> str:
@@ -138,50 +179,55 @@ def render_html(result: dict, outdir: str | Path) -> str:
     f = result["file"]; v = result["verdict"]
     b = result["beatgrid"]; s = result["spectral"]; m = result["metadata"]
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    esc_path = _html.escape(f["path"])
+    esc_name = _html.escape(f["name"])
     verdict_en = v["verdict"].replace("_", " ")
     verdict_zh = _VERDICT_ZH.get(v["verdict"], v["verdict"])
 
-    def leg_row(name_en, name_zh, leg):
-        return (f"<tr><td>{name_en}<br><span class='zh'>{name_zh}</span></td>"
-                f"<td class='{ 'bad' if 'ai' in leg['verdict'] else ('good' if leg['verdict'] in ('human_consistent','clean') else '')}'>"
-                f"{leg['verdict']}<br><span class='zh'>{_LEG_ZH.get(leg['verdict'], leg['verdict'])}</span></td></tr>")
-
     timing_rows = ""
     if b.get("applicable"):
-        timing_rows = f"""
-<tr><td>Tempo 速度</td><td>{b['bpm']} BPM (integer distance 距整数 {b['bpm_integer_distance']})</td></tr>
-<tr><td>Grid residual std 网格残差标准差</td><td>{b['residual_std_ms']} ms (max {b['residual_max_ms']})</td></tr>
-<tr><td>Beats within ±0.3 ms ±0.3 ms 内节拍占比</td><td>{b['pct_within_0.3ms']}%</td></tr>
-<tr><td>Beats within ±1 / ±2 ms</td><td>{b['pct_within_1ms']}% / {b['pct_within_2ms']}%</td></tr>
-<tr><td>Refined beats / coverage 精化节拍数/覆盖</td><td>{b['n_beats_refined']} / {b['coverage']}</td></tr>
-<tr><td>8-beat wander range 8 拍游移幅度</td><td>{b['wander_8beat_range_ms']} ms</td></tr>
-<tr><td>Reference (human DAW) 人类 DAW 参考</td><td>std &lt; 0.2–0.6 ms, ±0.3 ms ≈ 100%, round BPM</td></tr>
-<tr><td>Reference (generative AI) 生成式 AI 参考</td><td>std 2–40 ms, ±0.3 ms ≈ random, arbitrary BPM</td></tr>"""
+        def row(en, zh, val):
+            return f"<tr><td>{en}<br><span class='zh'>{zh}</span></td><td>{val}</td></tr>"
+        timing_rows = (
+            row("Tempo 速度", "", f"{b['bpm']} BPM (integer distance 距整数 {b['bpm_integer_distance']})") +
+            row("Grid residual std 网格残差标准差", "", f"{b['residual_std_ms']} ms (max {b['residual_max_ms']})") +
+            row("Beats within ±0.3 / ±1 / ±2 ms", "各容差内节拍占比", f"{b['pct_within_0.3ms']}% / {b['pct_within_1ms']}% / {b['pct_within_2ms']}%") +
+            row("Refined beats / coverage", "精化节拍数 / 覆盖率", f"{b['n_beats_refined']} / {b['coverage']}") +
+            row("8-beat wander range", "8 拍游移幅度", f"{b['wander_8beat_range_ms']} ms") +
+            row("Local tempo drift (20s windows)", "局部速度漂移", f"{b.get('local_bpm_drift')} BPM") +
+            row("Onset confidence (xcorr quality)", "onset 置信度（互相关质量均值）", f"{b.get('onset_confidence')}") +
+            row("Grid hit rate", "网格命中率", f"{b.get('grid_hit_rate')}") +
+            row("Interpretation 解读", "", f"<span class='zh'>{_html.escape(v['legs']['beatgrid'].get('interpretation_zh', ''))}</span><br>{_html.escape(v['legs']['beatgrid'].get('interpretation_en', ''))}") +
+            "<tr><td>Reference (human DAW) 人工 DAW 参考</td><td>std &lt; 0.2–0.6 ms, ±0.3 ms ≈ 100%, round BPM</td></tr>"
+            "<tr><td>Reference (generative AI) 生成式 AI 参考</td><td>std 2–40 ms, ±0.3 ms ≈ random, arbitrary BPM</td></tr>")
     else:
-        timing_rows = f"<tr><td colspan='2'>N/A — {b.get('reason')}<br><span class='zh'>不适用——{b.get('reason')}</span></td></tr>"
+        timing_rows = f"<tr><td colspan='2'>N/A — {b.get('reason')}</td></tr>"
 
-    spec_rows = f"""
-<tr><td>Cutoff 截止频率</td><td>{s.get('cutoff_hz')} Hz</td></tr>
-<tr><td>Brick wall 砖墙</td><td>{s.get('brick_wall')} (cliff 悬崖 {s.get('cliff_depth_db')} dB, above-cutoff mean 墙上均值 {s.get('above_cutoff_mean_db')} dB)</td></tr>
-<tr><td>Noise bed std 噪声底波动</td><td>{s.get('noise_bed_std_db')} dB</td></tr>
-<tr><td>Energy &gt;20.5 kHz 高频能量占比</td><td>{s['energy_fractions_pct'].get('pct_above_20.5k')}%</td></tr>"""
+    spec_rows = (
+        f"<tr><td>Cutoff 截止频率</td><td>{s.get('cutoff_hz')} Hz</td></tr>"
+        f"<tr><td>Brick wall 砖墙</td><td>{s.get('brick_wall')} (cliff 悬崖 {s.get('cliff_depth_db')} dB, above-cutoff mean 墙上均值 {s.get('above_cutoff_mean_db')} dB)</td></tr>"
+        f"<tr><td>Noise bed std 噪声底波动</td><td>{s.get('noise_bed_std_db')} dB</td></tr>"
+        f"<tr><td>Energy &gt;20.5 kHz 高频能量占比</td><td>{s['energy_fractions_pct'].get('pct_above_20.5k')}%</td></tr>")
 
-    md_rows = "".join(
-        f"<tr><td>{fl}</td></tr>" for fl in (m.get("flags") or ["none 无"]))
+    md_flags = ", ".join(_html.escape(str(x)) for x in (m.get("flags") or [])) or "none 无"
     fp = m.get("platform_fingerprint") or []
     fp_rows = "".join(
-        f"<tr><td>{p['platform']}: {', '.join(p['fields'])}</td></tr>" for p in fp) or "<tr><td>none 无</td></tr>"
+        f"<tr><td>{_html.escape(p['platform'])}: {', '.join(_html.escape(str(x)) for x in p['fields'])}</td></tr>"
+        for p in fp) or "<tr><td>none 无</td></tr>"
 
     imgs = ""
     if "kick_grid" in plots:
-        imgs += f"<figure><img src='data:image/png;base64,{_img64(plots['kick_grid'])}'><figcaption>EN · Kick onsets vs best-fit constant-BPM grid. Piecewise wander of ±2–5 ms is unreachable for a quantized DAW render and cannot be introduced by transcoding.<br><span class='zh'>中文 · 底鼓 onset 与最优恒定 BPM 网格的残差。±2–5 ms 分段游移是量化锁格的 DAW 渲染不可能出现的，转码也无法引入。</span></figcaption></figure>"
+        imgs += f"<figure><img src='data:image/png;base64,{_img64(plots['kick_grid'])}'><figcaption>EN · Kick onsets vs best-fit constant-BPM grid.<br><span class='zh'>中文 · 底鼓 onset 与最优恒定 BPM 网格的残差。</span></figcaption></figure>"
     if "spec_high" in plots:
-        imgs += f"<figure><img src='data:image/png;base64,{_img64(plots['spec_high'])}'><figcaption>EN · High-band spectrogram 11–22 kHz with detected cutoff. A brick wall + codec-noise bed inside a lossless container = lossy-source fingerprint.<br><span class='zh'>中文 · 高频段频谱图 11–22 kHz，红线为检测截止。无损容器内的砖墙 + 编码器噪声底 = 有损源指纹。</span></figcaption></figure>"
+        imgs += f"<figure><img src='data:image/png;base64,{_img64(plots['spec_high'])}'><figcaption>EN · High-band spectrogram 11–22 kHz with detected cutoff.<br><span class='zh'>中文 · 高频段频谱图 11–22 kHz，红线为检测截止。</span></figcaption></figure>"
     if "avg_spectrum" in plots:
         imgs += f"<figure><img src='data:image/png;base64,{_img64(plots['avg_spectrum'])}'><figcaption>EN · Long-term average spectrum.<br><span class='zh'>中文 · 全曲平均频谱。</span></figcaption></figure>"
 
+    tasks_html = _tasks_html(result.get("manual_tasks", []))
+    basis = _html.escape(v["positive_evidence"])
+
     html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<title>AkiForensics — {f['name']}</title><style>
+<title>AkiForensics — {esc_name}</title><style>
 :root{{--bg:#0d1117;--page:#151b23;--text:#d9e1ea;--muted:#8a97a6;--accent:#6cb2ff;--border:#2a3441;--thead:#1c242e;--rowalt:#181f28;--zh:#b9c6d4;}}
 body{{font-family:"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;margin:0;background:var(--bg);color:var(--text);line-height:1.7}}
 .page{{max-width:900px;margin:0 auto;background:var(--page);padding:40px 52px}}
@@ -202,24 +248,28 @@ code{{background:#212a35;padding:1px 5px;border-radius:3px;font-size:.88em}}
 footer{{margin-top:2.5em;font-size:.82em;color:var(--muted);border-top:1px solid var(--border);padding-top:1em}}
 </style></head><body><div class="page">
 <h1>AkiForensics Report<br><span class="zh" style="font-size:.7em">AI 曲取证报告</span></h1>
-<div class="meta">File 文件: <code>{f['path']}</code><br>Generated 生成: {now} · thresholds 阈值 {v['threshold_version']}</div>
+<div class="meta">File 文件: <code>{esc_path}</code><br>Generated 生成: {now} · thresholds 阈值 {v['threshold_version']} · evidence-model v2</div>
 <div class="verdict"><div class="big">{verdict_en}</div>
 <div class="big zh">{verdict_zh}</div>
-<div class="meta" style="margin-top:.6em">legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'])} · spectral 频谱={_LEG_ZH.get(v['legs']['spectral']['verdict'])} · metadata 元数据={_LEG_ZH.get(v['legs']['metadata']['verdict'])}</div></div>
-<div class="warn">{v['disclaimer']}<br><span class="zh">阈值 v0-n1：基于单一确认案例校准。判定为证据加权结论，非 ground truth。</span></div>
-<h2>1 · Timing forensics 时序取证（decisive 决定性）</h2>
+<div class="meta" style="margin-top:.6em">Positive basis 正向依据: {basis}<br>
+legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '')} · spectral 频谱={_LEG_ZH.get(v['legs']['spectral']['verdict'], '')} · metadata 元数据={_LEG_ZH.get(v['legs']['metadata']['verdict'], '')}</div></div>
+<div class="warn">{v['disclaimer']}<br><span class="zh">阈值 v0-n1：基于单一确认案例校准。判定为证据加权结论，非 ground truth。无异常 ≠ 人类特征。</span></div>
+<h2>1 · Timing forensics 时序取证 <span style="color:#8a97a6;font-size:.85em">(measurement 时序测量，来源归因见解读行)</span></h2>
 <table><tr><th>Metric 指标</th><th>Value 值</th></tr>{timing_rows}</table>
-<h2>2 · Spectral forensics 频谱取证（delivery chain 交付链）</h2>
+<h2>2 · Spectral forensics 频谱取证 <span style="color:#8a97a6;font-size:.85em">(delivery chain 交付链)</span></h2>
 <table><tr><th>Metric 指标</th><th>Value 值</th></tr>{spec_rows}</table>
 <h2>3 · Metadata forensics 元数据取证</h2>
-<table><tr><th>Flags 标记</th></tr>{md_rows}</table>
+<table><tr><th>Flags 标记</th></tr><tr><td>{md_flags}</td></tr></table>
 <table><tr><th>Platform fingerprint 平台指纹</th></tr>{fp_rows}</table>
-<p>Vendor 编码器: <code>{m.get('vendor') or 'n/a'}</code> · Container 容器: <code>{m.get('container')}</code> · {m.get('sample_rate')} Hz / {m.get('channels')} ch</p>
+<p>Vendor 编码器: <code>{_html.escape(str(m.get('vendor') or 'n/a'))}</code> · Container 容器: <code>{_html.escape(str(m.get('container')))}</code> · {m.get('sample_rate')} Hz / {m.get('channels')} ch</p>
+<h2>4 · Manual verification queue 待办人工验证</h2>
+{tasks_html}
+<h2>5 · Plots 图证</h2>
 {imgs}
-<h2>4 · Method 方法</h2>
-<p>EN · Timing: 30–130 Hz kick isolation, RANSAC tempo/phase scan, linear grid fit, cross-correlated sub-ms refinement. Spectral: 8192-pt Hann spectrogram, brick-wall cliff detection vs 14–20 kHz reference band. Metadata: FLAC block inventory + STREAMINFO MD5 verify + tag fingerprints.</p>
-<p class="zh">中文 · 时序：30–130 Hz 底鼓分离、RANSAC 速度/相位扫描、线性网格拟合、互相关亚毫秒精化。频谱：8192 点 Hann 频谱图、以 14–20 kHz 参考频带做砖墙悬崖检测。元数据：FLAC 块清单 + STREAMINFO MD5 校验 + 平台 tag 指纹。</p>
-<footer>AkiForensics v0.1.0 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
+<h2>6 · Method 方法</h2>
+<p>EN · Timing: 30–130 Hz kick isolation, RANSAC tempo/phase scan, linear grid fit, grid-position cross-correlated sub-ms refinement. Spectral: 8192-pt Hann spectrogram, brick-wall cliff detection vs 14–20 kHz reference band. Metadata: streamed FLAC block inventory + STREAMINFO MD5 verify + tag fingerprints. Delivery-chain findings are fused as one correlated vote, never summed.</p>
+<p class="zh">中文 · 时序：30–130 Hz 底鼓分离、RANSAC 速度/相位扫描、线性网格拟合、网格位置互相关亚毫秒精化。频谱：8192 点 Hann 频谱图、以 14–20 kHz 参考频带做砖墙悬崖检测。元数据：流式 FLAC 块清单 + STREAMINFO MD5 校验 + 平台 tag 指纹。交付链发现按相关性合票，不叠加计分。</p>
+<footer>AkiForensics v0.2.0 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
 </div></body></html>"""
     out = outdir / "report.html"
     out.write_text(html, encoding="utf-8")
@@ -236,7 +286,7 @@ def write_batch_summary(results: list[dict], outdir: str | Path) -> str:
         w = csv.writer(fcsv)
         w.writerow(["file", "verdict", "beatgrid", "bpm", "residual_std_ms",
                     "pct_0.3ms", "spectral", "cutoff_hz", "brick_wall",
-                    "metadata", "flags"])
+                    "metadata", "flags", "manual_tasks"])
         for r in results:
             v = r["verdict"]["legs"]
             b = r["beatgrid"]
@@ -246,26 +296,28 @@ def write_batch_summary(results: list[dict], outdir: str | Path) -> str:
                         v["spectral"]["verdict"], r["spectral"].get("cutoff_hz"),
                         r["spectral"].get("brick_wall"),
                         v["metadata"]["verdict"],
-                        ";".join(r["metadata"].get("flags") or [])])
+                        ";".join(r["metadata"].get("flags") or []),
+                        ";".join(t["task_id"] for t in r.get("manual_tasks", []))])
     rows = ""
     for r in results:
         vd = r["verdict"]["verdict"]
         cls = "bad" if "AI" in vd else ("good" if vd == "LIKELY_HUMAN" else "")
-        rows += (f"<tr><td>{r['file']['name']}</td><td class='{cls}'>{vd}<br>"
-                 f"<span class='zh'>{_VERDICT_ZH.get(vd, '')}</span></td>"
-                 f"<td>{r['verdict']['legs']['beatgrid']['verdict']}</td>"
+        rows += (f"<tr><td>{_html.escape(r['file']['name'])}</td>"
+                 f"<td class='{cls}'>{_html.escape(vd)}<br><span class='zh'>{_VERDICT_ZH.get(vd, '')}</span></td>"
+                 f"<td>{_html.escape(r['verdict']['legs']['beatgrid']['verdict'])}</td>"
                  f"<td>{r['beatgrid'].get('residual_std_ms') or '—'}</td>"
                  f"<td>{r['spectral'].get('cutoff_hz') or '—'}</td>"
-                 f"<td>{', '.join(r['metadata'].get('flags') or []) or '—'}</td></tr>")
+                 f"<td>{_html.escape(', '.join(r['metadata'].get('flags') or []) or '—')}</td>"
+                 f"<td>{', '.join(t['task_id'] for t in r.get('manual_tasks', [])) or '—'}</td></tr>")
     idx = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>AkiForensics batch</title>
 <style>body{{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#0d1117;color:#d9e1ea}}
-.page{{max-width:960px;margin:0 auto;background:#151b23;padding:32px}}
+.page{{max-width:1080px;margin:0 auto;background:#151b23;padding:32px}}
 h1{{color:#6cb2ff}}table{{border-collapse:collapse;width:100%;font-size:.9em}}
 th,td{{border:1px solid #2a3441;padding:6px 10px;text-align:left}}
 th{{background:#1c242e;color:#a8c7e8}}tr:nth-child(even) td{{background:#181f28}}
 .good{{color:#5fd08a;font-weight:600}}.bad{{color:#ff7b72;font-weight:600}}.zh{{color:#b9c6d4}}</style></head>
 <body><div class="page"><h1>AkiForensics — Batch Summary 批量汇总</h1>
-<table><tr><th>File 文件</th><th>Verdict 判定</th><th>Timing 时序</th><th>Residual ms</th><th>Cutoff Hz</th><th>Flags</th></tr>{rows}</table>
-<p class="zh">阈值 {results[0]['verdict']['threshold_version']}（单一案例校准），判定为证据加权结论。</p></div></body></html>"""
+<table><tr><th>File 文件</th><th>Verdict 判定</th><th>Timing 时序</th><th>Residual ms</th><th>Cutoff Hz</th><th>Flags</th><th>Tasks 任务</th></tr>{rows}</table>
+<p class="zh">阈值 {results[0]['verdict']['threshold_version']}（单一案例校准），判定为证据加权结论；交付链发现已合票。</p></div></body></html>"""
     (outdir / "index.html").write_text(idx, encoding="utf-8")
     return str(csv_path)
