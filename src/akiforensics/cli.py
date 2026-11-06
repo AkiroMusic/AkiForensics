@@ -67,6 +67,10 @@ def cmd_merge_submission(args) -> int:
         return 2
     merged = submission.merge(sub, analysis, card)
     report.write_json(merged, rpath)
+    try:
+        report.render_html(merged, rpath.parent)  # keep HTML in sync with JSON
+    except Exception as e:
+        print(f"note: HTML regeneration failed ({e}); JSON is updated")
     ev = merged["human_evidence"][-1]
     print(f"merged {ev['task_id']}: summary={ev['summary']}")
     for c in ev["comparisons"]:

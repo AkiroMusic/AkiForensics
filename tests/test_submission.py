@@ -27,8 +27,8 @@ class SubmissionTests(unittest.TestCase):
         wav = fx.render_kick_track(cls.fx.dir / "sub_k.wav", bpm=128, dur=30,
                                    jitter_ms=3.0, wander_ms=2.0)
         noise = fx.render_band_noise(cls.fx.dir / "sub_n.wav", cutoff_hz=20500)
-        sr, _st, m_k = decode.decode_work(str(wav), sample_rate=44100)
-        sr_n, _st2, m_n = decode.decode_work(str(noise), sample_rate=44100)
+        sr, _st, m_k = decode.decode_work(str(wav), sample_rate=44100, channels=2)
+        sr_n, _st2, m_n = decode.decode_work(str(noise), sample_rate=44100, channels=2)
         beats = beatgrid.analyze(m_k, sr, CFG["beatgrid"])
         spec = spectral.analyze(m_n, sr_n, CFG["spectral"])
         meta = {"flags": [], "flag_families": {"integrity": [], "packaging": [],

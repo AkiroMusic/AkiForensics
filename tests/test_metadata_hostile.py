@@ -79,3 +79,13 @@ class VorbisCommentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Md5ZeroGuardTests(unittest.TestCase):
+    def test_zero_md5_is_unknown_not_mismatch(self):
+        from akiforensics.metadata import verify_flac_md5
+        si = {"md5": "0" * 32, "bits_per_sample": 16}
+        out = verify_flac_md5("nonexistent.flac", si)
+        self.assertIsNone(out["md5_ok"])
+        self.assertIsNone(out["md5_computed"])
+        self.assertIn("RFC 9639", out["note"])

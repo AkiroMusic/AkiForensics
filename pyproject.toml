@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akiforensics"
-version = "0.3.0"
+version = "0.3.1"
 description = "Forensic toolkit for detecting AI-generated music (Suno-style): beat-grid timing, lossy-cutoff and metadata chain analysis"
 readme = "README.md"
 requires-python = ">=3.11"

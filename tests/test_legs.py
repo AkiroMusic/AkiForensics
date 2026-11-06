@@ -33,8 +33,8 @@ class BeatGridTests(unittest.TestCase):
                                           jitter_ms=0, wander_ms=0)
         cls.jittered = fx.render_kick_track(cls.fx.dir / "jittered.wav", bpm=128,
                                             jitter_ms=3.0, wander_ms=2.0)
-        sr_l, _st, m_lock = decode.decode_work(str(cls.locked), sample_rate=44100)
-        sr_j, _st, m_jit = decode.decode_work(str(cls.jittered), sample_rate=44100)
+        sr_l, _st, m_lock = decode.decode_work(str(cls.locked), sample_rate=44100, channels=2)
+        sr_j, _st, m_jit = decode.decode_work(str(cls.jittered), sample_rate=44100, channels=2)
         cls.res_lock = beatgrid.analyze(m_lock, sr_l, CFG["beatgrid"])
         cls.res_jit = beatgrid.analyze(m_jit, sr_j, CFG["beatgrid"])
 
@@ -87,8 +87,8 @@ class TwoStepPatternTests(unittest.TestCase):
         cls.jittered = fx.render_kick_track(cls.fx.dir / "ts_jit.wav", bpm=136,
                                             jitter_ms=3.0, wander_ms=2.0, dur=90,
                                             pattern="twostep")
-        sr, _st, m1 = decode.decode_work(str(cls.locked), sample_rate=44100)
-        _, _st, m2 = decode.decode_work(str(cls.jittered), sample_rate=44100)
+        sr, _st, m1 = decode.decode_work(str(cls.locked), sample_rate=44100, channels=2)
+        _, _st, m2 = decode.decode_work(str(cls.jittered), sample_rate=44100, channels=2)
         cls.res_lock = beatgrid.analyze(m1, sr, CFG["beatgrid"])
         cls.res_jit = beatgrid.analyze(m2, sr, CFG["beatgrid"])
 
@@ -123,8 +123,8 @@ class SpectralTests(unittest.TestCase):
         cls.fx = fx.FixtureDir()
         cls.full = fx.render_band_noise(cls.fx.dir / "full.wav", cutoff_hz=None)
         cls.walled = fx.render_band_noise(cls.fx.dir / "walled.wav", cutoff_hz=20500)
-        sr_f, _st, m_full = decode.decode_work(str(cls.full), sample_rate=44100)
-        sr_w, _st, m_walled = decode.decode_work(str(cls.walled), sample_rate=44100)
+        sr_f, _st, m_full = decode.decode_work(str(cls.full), sample_rate=44100, channels=2)
+        sr_w, _st, m_walled = decode.decode_work(str(cls.walled), sample_rate=44100, channels=2)
         cls.res_full = spectral.analyze(m_full, sr_f, CFG["spectral"])
         cls.res_walled = spectral.analyze(m_walled, sr_w, CFG["spectral"])
 
@@ -205,6 +205,26 @@ class VerdictAggregationTests(unittest.TestCase):
         out = verdict.aggregate(self._meta([]), self._sp(True, 20462),
                                 self._bg(0.0, 0.0, applicable=False), "flac", CFG)
         self.assertEqual(out["verdict"], "DELIVERY_CHAIN_ANOMALY")
+
+    def test_likely_human_blocked_by_lossy_container(self):
+        # MP3 input: spectral is na (no information), timing locked, metadata
+        # clean => the human-leaning evidence is INCOMPLETE, must not grade
+        # LIKELY_HUMAN (v0.3.1 fix).
+        out = verdict.aggregate(self._meta([]),
+                                {"brick_wall": False, "cutoff_hz": None,
+                                 "cliff_depth_db": None},
+                                self._bg(0.3, 95.0), "mp3", CFG)
+        self.assertNotEqual(out["verdict"], "LIKELY_HUMAN")
+        self.assertEqual(out["verdict"], "INCONCLUSIVE")
+
+    def test_integrity_never_upgrades_to_convergent(self):
+        # metadata integrity anomalies may be corruption — they must not
+        # upgrade timing variation to AI_EVIDENCE_CONVERGENT (v0.3.1 fix)
+        fams = {"integrity": ["md5_mismatch"], "packaging": [], "provenance": []}
+        out = verdict.aggregate(self._meta(["md5_mismatch"], fams),
+                                self._sp(False, None), self._bg(2.3, 7.0), "flac", CFG)
+        self.assertEqual(out["verdict"], "LIKELY_AI")
+        self.assertNotEqual(out["verdict"], "AI_EVIDENCE_CONVERGENT")
 
     def test_packaging_flag_never_votes(self):
         # picture MIME mismatch is packaging — must NOT produce a delivery verdict

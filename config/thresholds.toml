@@ -2,7 +2,8 @@
 # Calibration provenance:
 #   v0-n1.1 — human side: physics-based bounds (quantized DAW render = sample-
 #             locked; unquantized live playing admitted as confounder).
-#             AI side: 7 real Suno WAV originals (commercial demos, 2026-11-07):
+#             AI side: SUNO REFERENCE SET ONLY - 7 real Suno WAV originals
+#             (commercial demos, 2026-11-07; not a general AI-music set):
 #             brick wall 7/7 at 20,080-20,180 Hz + codec noise-bed breathing
 #             10.75-15.01 dB; timing std (where measurable) 1.32-3.40 ms, all
 #             above the human bound, none near 0.6. Thresholds unchanged at

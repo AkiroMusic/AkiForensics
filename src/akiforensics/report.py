@@ -17,7 +17,10 @@ import numpy as np
 
 def _jsonable(o):
     if isinstance(o, dict):
-        return {k: _jsonable(v) for k, v in o.items() if k != "_plotdata"}
+        # keys starting with "_" are runtime working data (arrays etc.),
+        # never report content — _plotdata, _stereo, ...
+        return {k: _jsonable(v) for k, v in o.items()
+                if not (isinstance(k, str) and k.startswith("_"))}
     if isinstance(o, (list, tuple)):
         return [_jsonable(v) for v in o]
     if isinstance(o, (np.integer,)):
@@ -160,14 +163,19 @@ def _tasks_html(tasks_list: list[dict]) -> str:
                 "<p>No pending manual tasks this round (no verdict-moving evidence gaps).</p>")
     rows = ""
     for t in tasks_list:
+        # hypothesis-blinded runs: the HTML operator table must show the
+        # operator_view projection, never the full analyst card
+        shown = t.get("operator_view") if "operator_view" in t else t
+        hyp = shown.get("hypothesis_zh") or shown.get("instruction_zh", "")
+        gap = shown.get("evidence_gap", "—")
         rec = "; ".join(f"<code>{_html.escape(k)}</code>: {_html.escape(str(v))}"
                         for k, v in t["record_fields"].items())
         rows += f"""<tr><td><b>{_html.escape(t['task_id'])}</b><br>
 <span class="zh">盲化 {"开" if t['blinded'] else "关"}</span></td>
 <td>{_html.escape(t['tool']['name'])}<br><span class="zh">{_html.escape(t['tool']['module'])}</span></td>
 <td>{t['segment']['start_s']} – {t['segment']['end_s']} s</td>
-<td class="zh">{_html.escape(t['hypothesis_zh'])}</td>
-<td class="zh">{_html.escape(t['evidence_gap'])}</td>
+<td class="zh">{_html.escape(hyp)}</td>
+<td class="zh">{_html.escape(gap)}</td>
 <td>{rec}</td></tr>"""
     head = ("全步骤见 <code>docs/HUMAN_WORKFLOW.md</code>；执行后把数值表与截图回传给 AI 会话，"
             "按双轨合并规则入库（人工记录永不覆盖引擎测量）。<br>"
@@ -276,7 +284,7 @@ legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '
 <h2>6 · Method 方法</h2>
 <p>EN · Timing: 30–130 Hz kick isolation, RANSAC tempo/phase scan, linear grid fit, grid-position cross-correlated sub-ms refinement. Spectral: 8192-pt Hann spectrogram, brick-wall cliff detection vs 14–20 kHz reference band. Metadata: streamed FLAC block inventory + STREAMINFO MD5 verify + tag fingerprints. Delivery-chain findings are fused as one correlated vote, never summed.</p>
 <p class="zh">中文 · 时序：30–130 Hz 底鼓分离、RANSAC 速度/相位扫描、线性网格拟合、网格位置互相关亚毫秒精化。频谱：8192 点 Hann 频谱图、以 14–20 kHz 参考频带做砖墙悬崖检测。元数据：流式 FLAC 块清单 + STREAMINFO MD5 校验 + 平台 tag 指纹。交付链发现按相关性合票，不叠加计分。</p>
-<footer>AkiForensics v0.3.0 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
+<footer>AkiForensics v0.3.1 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
 </div></body></html>"""
     out = outdir / "report.html"
     out.write_text(html, encoding="utf-8")

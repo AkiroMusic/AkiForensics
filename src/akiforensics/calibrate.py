@@ -63,11 +63,16 @@ def run(human_dir: str, ai_dir: str, cfg: dict) -> None:
                 print(f"  {key:16s} median={st[0]:8.3f}  P10={st[1]:8.3f}  P90={st[2]:8.3f} {unit}")
         if rows_s:
             walls = sum(1 for s in rows_s if s["wall"])
-            cuts = [s["cutoff_hz"] for s in rows_s if s["cutoff_hz"]]
-            hvs = [s["hf_var"] for s in rows_s if s["hf_var"] is not None]
-            print(f"  spectral (n={len(rows_s)}): brick-wall {walls}/{len(rows_s)}"
-                  + (f", cutoff {min(cuts):.0f}-{max(cuts):.0f} Hz" if cuts else "")
-                  + (f", hf_variability {min(hvs):.1f}-{max(hvs):.1f} dB" if hvs else ""))
+            print(f"  spectral (n={len(rows_s)}): brick-wall rate {walls}/{len(rows_s)}"
+                  f" = {walls/len(rows_s)*100:.0f}%")
+            for key, unit in (("cutoff_hz", "Hz"), ("cliff_depth_db", "dB"),
+                              ("hf_var", "dB")):
+                vals = [s[key] for s in rows_s if s.get(key) is not None]
+                if vals:
+                    arr = np.array(vals, dtype=float)
+                    print(f"  {key:16s} median={np.median(arr):9.1f}  "
+                          f"P10={np.percentile(arr, 10):9.1f}  "
+                          f"P90={np.percentile(arr, 90):9.1f}  {unit}  (n={len(arr)})")
         print()
     if all_spectral:
         print(f"spectral rows total: {len(all_spectral)} (per-class above)")

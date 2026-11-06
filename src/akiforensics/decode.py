@@ -50,24 +50,27 @@ def decode_pcm(path: str, sample_rate: int | None = None,
     return proc.stdout
 
 
-def decode_work(path: str, sample_rate: int,
+def decode_work(path: str, sample_rate: int, channels: int | None = None,
                 sample_fmt: str = "f32le") -> tuple[int, np.ndarray, np.ndarray]:
     """Decode to float working copies for analysis pipelines.
 
-    Float PCM preserves 24-bit sources (s16le would quantize them); native
-    channel count is kept and BOTH stereo and a mono downmix are returned —
-    future stereo/mid-side forensics must not use the averaged signal.
-    Returns (sample_rate, stereo float64 [n, ch], mono float64 [n]).
+    Float PCM preserves 24-bit sources (s16le would quantize them). channels
+   =None keeps the NATIVE layout (no -ac collapse of mono/5.1 sources); both
+    the channel array and a mono downmix are returned — future stereo/mid-side
+    forensics must not use the averaged signal.
+    Returns (sample_rate, channels float64 [n, ch], mono float64 [n]).
     """
-    channels = 2  # ffmpeg -ac 2 collapses >2 layouts; stereo is the norm here
     raw = decode_pcm(path, sample_rate=sample_rate, channels=channels,
                      sample_fmt=sample_fmt)
     dt = {"f32le": "<f4", "s16le": "<i2", "s32le": "<i4"}[sample_fmt]
     x = np.frombuffer(raw, dtype=dt).astype(np.float64)
     if sample_fmt == "s16le":
         x /= 32768.0
-    stereo = x.reshape(-1, channels)
-    return int(sample_rate), stereo, stereo.mean(axis=1)
+    if channels is None:
+        raise ValueError("decode_work needs the channel count from probe(); "
+                         "pass audio['channels'] to preserve the native layout")
+    arr = x.reshape(-1, int(channels))
+    return int(sample_rate), arr, arr.mean(axis=1)
 
 
 def decode_errors(path: str) -> list[str]:

@@ -1,68 +1,71 @@
-# AkiForensics v0.3.0 — 2026-11-07
+# AkiForensics v0.3.1 — 2026-11-07
 
-Adversarial review round 2 response: 3 confirmed P0 bugs fixed, verdict semantics
-hardened (evidence-model v3), human-submission loop closed. Threshold provenance
-`v0-n1.1` unchanged (single source of truth: config/thresholds.toml).
+Adversarial review round 3 response: all six main claims reproduced and fixed,
+evidence-model v3.1 hardening. Thresholds unchanged (v0-n1.1).
 
-## P0 fixes (all reproduced before fixing)
+## P0 (all reproduced before fixing)
 
-- **metadata.py**: `_picture_info` double-`errors` decode TypeError (crash on any
-  FLAC with a PICTURE block — never triggered by old fixtures, found by review);
-  full bounds checks in `_picture_info` + `_parse_vorbis_comment`; PICTURE layout
-  corrected to the FLAC spec (w/h/depth/colors + dataLen skip). Regression-tested
-  with direct byte injection incl. hostile/truncated/absurd-length inputs.
-- **tests**: corpus integration test asserted v1 labels (`ai_consistent`) —
-  vacuously passing since v2. Rewritten for v3 with explicit `na` handling and
-  mandatory alternative-disclosure assertion.
-- **version drift**: disclaimer hard-coded `v0-n1` vs config `v0-n1.1`. The
-  disclaimer is now generated from `cfg["meta"]["version"]`; docs reference the
-  config as the single source of truth.
+- **report.json PCM leak**: `_stereo` working array was serialized into JSON
+  (17.2 MB for a 10 s file). `_jsonable` now strips ALL underscore-prefixed
+  runtime keys; new integration test asserts real engine output serializes
+  without `_stereo`/`_plotdata` and under a 2 MB sanity cap.
+- **LIKELY_HUMAN with spectral `na`**: lossy-container input could grade
+  LIKELY_HUMAN with zero spectral information. Now requires MEASURED
+  `no_anomaly_detected`; `na` ⇒ INCONCLUSIVE. Regression: MP3 + locked grid
+  → INCONCLUSIVE.
+- **FLAC MD5 all-zero field** (RFC 9639 §8.2): treated as unknown, never a
+  mismatch; unit-tested via direct injection.
 
-## Evidence-model v3 semantics
+## Verdict hardening (v3.1)
 
-- `STRONG_AI_EVIDENCE` → `AI_EVIDENCE_CONVERGENT`; EVERY source-leaning verdict
-  carries mandatory `alternative_hypotheses` (e.g. "unquantized live performance +
-  lossy transcode of a human master"; `LIKELY_HUMAN` discloses "loop/sampler-based
-  AI-hybrid production"). Convergent verdicts auto-issue the DAW-001 listening
-  gate (alternative-hypothesis check).
-- Metadata flags classified into families: integrity / packaging / provenance.
-  Only spectral fingerprint + INTEGRITY flags feed the delivery-chain vote;
-  packaging (cover MIME mismatch) and provenance (platform tags) are context only.
-- `noise_bed_std_db` → `hf_band_level_variability_db` (it measures HF band level
-  variation through time, not a codec noise floor).
-- Spectral leg: Nyquist guard (low sample rates → `na` with reason, never
-  "no anomaly").
-- RX-001 acceptance de-attributed: confirms "a stable HF boundary exists"
-  (transcode-compatible, not exclusive); RX-003 multi-resolution verification
-  (2048/4096/8192) added to the protocol.
+- Convergence requires the SPECTRAL fingerprint: metadata INTEGRITY anomalies
+  can raise a standalone DELIVERY_CHAIN_ANOMALY but never upgrade to
+  AI_EVIDENCE_CONVERGENT (they may be corruption, not transcoding).
+- Dedicated `alternative_hypotheses` for the timing-only branch (live
+  performance / kick-detection error / genre applicability) — no longer
+  reuses the convergent list.
+- Every verdict carries `calibration_status: preliminary`,
+  `human_reference_status: insufficient`, `probability_calibrated: false`.
 
 ## Engineering
 
-- `decode_work`: float32 working copies at NATIVE rate (24-bit sources no longer
-  quantized to 16-bit), stereo preserved alongside the mono downmix for future
-  stereo/mid-side forensics; `decode_pcm` annotation fixed.
-- calibrate.py: spectral features (cutoff/cliff/hf_variability/wall-rate) now
-  included in per-class stats; output framed as THRESHOLD PROPOSAL (never
-  auto-applied).
-- Human-submission loop closed: `submission.py` (validate against task card →
-  dual-track comparison with per-task tolerances → attach evidence object; engine
-  values never overwritten) + CLI `akiforensics merge-submission`.
-- Blinding levels: `value` (default) / `hypothesis` (operator_view strips
-  hypothesis, gap, and acceptance wording) / `none`; `analyze --blinding` flag.
-- `analyze --task UVR-001 --task PA-001` for stage-2 cards.
-- README/docs wording: evidence families (not "independent legs"), empirical
-  ranges labeled with n, v3 vocabulary in test descriptions.
+- Native channel layout: `decode_work(channels=)` passed from probe — no
+  `-ac 2` collapse of mono/multichannel sources.
+- Full decode-error scan decoupled from SEEKTABLE presence.
+- True hypothesis-blinded operator view: neutral full-band survey steps
+  (`blind_steps_zh`) + generic record schema (`boundaries: [{freq_hz, note}]`)
+  — field names like `cutoff_hz_left` no longer leak the target; HTML task
+  table renders the operator view, never the analyst card; leakage asserted
+  in tests.
+- Submission identity: `task_instance_id` + `card_sha256` on cards, validated
+  on merge (stale-card submissions rejected); value type validation;
+  `comparison_basis` marks engine-mono vs per-channel human comparisons as
+  indicative only; merge-submission now regenerates the HTML report.
+- UVR-001: structured `model {name, version, sha256}` object on the card
+  (was doc-only in v0.3.0 — caught by review).
+- RX-003 redefined as Multi-Resolution MEASUREMENT ROBUSTNESS: FFT-size
+  stability validates the boundary estimate, it does NOT discriminate codec
+  cutoff vs human EQ (a real filter's cutoff does not move with FFT size
+  either — the v0.3.0 claim was wrong).
+- calibrate.py: brick-wall rate + median/P10/P90 for cutoff, cliff depth and
+  HF variability per class; output explicitly framed as proposal-only.
+- Corpus naming: "Suno Reference Set" (not a general AI-music set) across
+  config/docs; three-version note (software / protocol 1.0 / thresholds).
+
+## Bonus robustness fix
+
+Pure-noise input (no kicks) crashed `_fit_grid` with an empty-vector polyfit
+(two paths). Guarded; regression via full-flow walled-noise analysis
+(beatgrid `na` + RX-001 card issued).
 
 ## Tests
 
-46 tests (was 32): hostile-metadata byte injection, submission
-validate/merge/agreement/contradiction/no-overwrite, blinding levels +
-operator_view projection, packaging-flag-never-votes, dynamic-disclaimer,
-two-step main-cluster regression, corpus integration (v3 labels).
+51 tests (was 46): serialization-leak integration, MD5 zero guard,
+LIKELY_HUMAN lossy-container block, integrity-never-upgrades-convergent,
+operator-view leakage assertions (no `cutoff_hz` in operator blob, no analyst
+wording in HTML), blinding levels with generic blind schema, card identity.
 
-## Declined (with reasons, see docs/reviews response)
+## Review loop
 
-- Full evidence-graph / task-store infrastructure (single-session loop;
-  submission.py covers the six-stage return path minus state management).
-- Stripping attribution entirely from verdicts (replaced by mandatory
-  alternative-hypotheses disclosure — shrinking the explanation space IS the job).
+Full adjudication: `AkiForensics-Response-R4.md` (round-3 review: 6/6 claims
+verified — strongest round so far; RX-003 methodology corrected on our side).

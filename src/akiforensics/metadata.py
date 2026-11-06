@@ -95,7 +95,14 @@ def _picture_info(pic: bytes) -> dict:
 
 
 def verify_flac_md5(path: str, streaminfo: dict) -> dict:
-    """Recompute the STREAMINFO MD5 over natively decoded PCM."""
+    """Recompute the STREAMINFO MD5 over natively decoded PCM.
+
+    Per RFC 9639 §8.2: an all-zero MD5 field means "unknown/not computed",
+    not a verification failure.
+    """
+    if set(streaminfo["md5"]) == {"0"}:
+        return {"md5_computed": None, "md5_ok": None,
+                "note": "STREAMINFO MD5 field is zero (unknown per RFC 9639)"}
     bps = streaminfo["bits_per_sample"]
     fmt = _FMT_FOR_BPS.get(bps)
     if fmt is None:
@@ -170,11 +177,11 @@ def analyze(path: str, probe_info: dict | None = None) -> dict:
         if "QUALITY" in tags_u and tags_u["QUALITY"].lower() in ("flac", "lossless"):
             # platform self-declares lossless; truthfulness is spectral leg's job
             out["flags"].append("platform_quality_tag_present")
-        if "SEEKTABLE" in flac["blocks"]:
-            errs = decode.decode_errors(path)
-            if errs:
-                out["flags"].append("decoder_errors")
-                out["decoder_errors"] = errs
+        # full decode-error scan is independent of SEEKTABLE presence
+        errs = decode.decode_errors(path)
+        if errs:
+            out["flags"].append("decoder_errors")
+            out["decoder_errors"] = errs
 
     vendor = (out.get("flac") or {}).get("vendor")
     if vendor:

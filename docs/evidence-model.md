@@ -1,4 +1,4 @@
-# Evidence Model (evidence-model v2)
+# Evidence Model (evidence-model v3)
 
 How measurements become verdicts. / 测量如何变成判定。
 
@@ -29,7 +29,7 @@ Cutoff wall, codec noise bed, and metadata anomalies typically originate from a 
 |---|---|---|
 | `AI_EVIDENCE_CONVERGENT` | `timing_variation` **and** delivery-chain anomaly 收敛；auto-issues the listening gate 自动签发听检门 | unquantized live performance + lossy transcode of a human master |
 | `LIKELY_AI` | `timing_variation` alone（音频内在证据，无交付链佐证） | same as above |
-| `LIKELY_HUMAN` | `timing_locked` **and** no delivery anomaly — production-consistency, NOT authorship 制作一致性而非作者身份 | loop/sampler-based AI-hybrid production |
+| `LIKELY_HUMAN` | `timing_locked` **and** spectral `no_anomaly_detected` (MEASURED, not `na`) **and** clean metadata 制作一致性而非作者身份；lossy 容器下 spectral 为 `na` ⇒ 证据不全，不进入此判定 | loop/sampler-based AI-hybrid production |
 | `DELIVERY_CHAIN_ANOMALY` | Delivery anomaly without timing evidence — attribution withheld 归因保留 | n/a (no attribution made) |
 | `INCONCLUSIVE` | No positive evidence 无正向证据 | n/a |
 

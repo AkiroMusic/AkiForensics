@@ -19,6 +19,8 @@ Expected submission shape:
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -37,6 +39,13 @@ def _require(cond: bool, msg: str):
         raise SubmissionError(msg)
 
 
+def card_fingerprint(card: dict) -> str:
+    """Stable hash of the card content (sans operator_view/round info)."""
+    payload = {k: v for k, v in card.items() if k not in ("operator_view",)}
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
 def validate(submission: dict, card: dict) -> None:
     """Structural validation against the task card."""
     _require(isinstance(submission, dict), "submission must be a JSON object")
@@ -45,12 +54,20 @@ def validate(submission: dict, card: dict) -> None:
              f"card={card['task_id']}")
     _require(submission.get("file_sha256") == card.get("file_sha256"),
              "file_sha256 does not match the analyzed file — wrong file returned?")
+    if card.get("card_sha256"):
+        _require(submission.get("card_sha256") in (None, card["card_sha256"]),
+                 "card_sha256 mismatch — submission answers a DIFFERENT card version "
+                 "(protocol/segment changed between rounds)")
     values = submission.get("values")
     _require(isinstance(values, dict), "missing 'values' object")
     for k in card["record_fields"]:
         if k == "screenshots":
             continue
         _require(k in values, f"missing record field '{k}' (null is a valid value)")
+    for k, v in values.items():
+        _require(v is None or isinstance(v, (str, int, float, list)),
+                 f"record field '{k}': unsupported type {type(v).__name__} "
+                 "(allowed: string / number / boolean-free list / null)")
 
 
 def _compare_numeric(engine_val: float, human_val: float, tol: float) -> str:
@@ -84,11 +101,16 @@ def merge(submission: dict, analysis: dict, card: dict) -> dict:
         comparisons.append({
             "field": k, "engine": eng_v, "human": human_v,
             "tolerance": tol,
+            "comparison_basis": ("engine mono-downmix cutoff vs per-channel human "
+                                 "measurement — indicative only until per-channel "
+                                 "spectral analysis ships") if eng_v is not None else None,
             "result": _compare_numeric(eng_v, human_v, tol) if tol else "recorded",
         })
 
     evidence = {
         "task_id": card["task_id"],
+        "task_instance_id": card.get("task_instance_id", card["task_id"]),
+        "card_sha256": card_fingerprint(card),
         "source": {"type": "human_tool", "tool": card["tool"]["name"]},
         "values": values,
         "screenshots": submission.get("screenshots", []),

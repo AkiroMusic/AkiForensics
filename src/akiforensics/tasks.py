@@ -106,12 +106,33 @@ def _card(task_id, tool, segment, hypothesis_zh, hypothesis_en, steps, record,
     return card
 
 
+def _blind_steps(task_id: str, segment: tuple) -> list[str]:
+    """Hypothesis-blinded measurement instructions: a neutral full-band survey,
+    never naming the suspected phenomenon."""
+    return [
+        f"1. 打开原始音频文件，跳转至 {segment[0]:.2f}s",
+        f"2. 选中 {segment[0]:.2f}s – {segment[1]:.2f}s（整段，不要改选）",
+        "3. Spectrogram：FFT Size = 8192、Window = Hann，截图（含时间轴与频率轴刻度）",
+        "4. Spectrum Analyzer：分别对 L / R 声道做整段平均，各截图一张（设置入镜）",
+        "5. 记录 5 kHz–22 kHz 范围内所有你观察到的明显频率边界或异常（频率 + 简述）；没有就写 none",
+        "6. 记录工具版本号",
+    ]
+
+
 def _operator_view(card: dict) -> dict:
     """Hypothesis-blinded projection: measurement task only — no hypothesis,
     no evidence gap, no acceptance wording that hints at what is suspected."""
+    steps = card.get("blind_steps_zh", card["steps_zh"])
+    record = card["record_fields"]
+    if "blind_steps_zh" in card:
+        # fully hypothesis-blinded: generic record schema — field names like
+        # cutoff_hz_left would leak what is being hunted
+        record = {"boundaries_left": "数组：[{freq_hz, note}] 或 none",
+                  "boundaries_right": "数组：[{freq_hz, note}] 或 none",
+                  "tool_version": "字符串"}
     return {"task_id": card["task_id"], "protocol": card["protocol"],
             "tool": card["tool"], "segment": card["segment"],
-            "steps_zh": card["steps_zh"], "record_fields": card["record_fields"],
+            "steps_zh": steps, "record_fields": record,
             "instruction_zh": ("请按步骤独立完成测量并如实记录；不要向 AI 询问任何预期值，"
                                "也不要根据既往分析推测目标结果。"),
             "file_sha256": card.get("file_sha256")}
@@ -162,6 +183,7 @@ def generate_tasks(analysis: dict, blinded: bool = True,
             "可改变 spectral 链结论（确证/推翻有损源指纹）",
             blinded=blinded,
             extra={"file_sha256": sha,
+                   "blind_steps_zh": _blind_steps("RX-001", seg),
                    "blinding_note": "测量盲化：记录全部数值前，不要向 AI 询问任何预期值"}))
 
     # RX-002 — kick waveform inspection (only when timing variation detected)
@@ -253,27 +275,42 @@ def generate_tasks(analysis: dict, blinded: bool = True,
     # UVR-001 — stem separation (stage-2, on demand after vocal flags)
     if "UVR-001" in force:
         seg = _loudest_segment(analysis, 45.0, duration)
+        model = analysis.get("_uvr_model") or {
+            "name": "standardized-at-generation-time",
+            "version": "standardized-at-generation-time",
+            "sha256": "standardized-at-generation-time",
+        }
         cards.append(_card(
             "UVR-001",
-            {"name": "Ultimate Vocal Remover 5", "module": "2-Stage Separation", "version": "由执行人记录"},
+            {"name": "Ultimate Vocal Remover 5", "module": "2-Stage Separation",
+             "version": "由执行人记录"},
             seg,
             "分离人声/伴奏后，分别检查声部内异常（注意：分离伪迹 ≠ 生成痕迹）",
             "Inspect separated stems for within-stem anomalies (separation artifacts ≠ generation artifacts)",
             [
-                f"1. 用 docs/HUMAN_WORKFLOW.md §UVR-001 指定的固定模型与设置",
+                f"1. 使用任务指定的模型：{model['name']} v{model['version']} (sha256 {model['sha256'][:16]}…)，"
+                "任何偏离必须写进回传 deviations",
                 f"2. 只对 {seg[0]:.1f}s – {seg[1]:.1f}s 片段做 2-stem（Vocals/Instrumental）分离",
                 "3. 导出两个 stem 文件（保持原始采样率，不做任何后处理）",
-                "4. 回传 stem 文件 + 模型名/设置截图；后续频谱/时序分析由引擎自动完成",
+                "4. 回传 stem 文件 + 模型设置截图；后续频谱/时序分析由引擎自动完成",
             ],
             {"vocal_stem": "文件", "instrumental_stem": "文件",
-             "model_name": "字符串（必须与 HUMAN_WORKFLOW.md 一致）",
+             "model_name": "字符串（必须与卡片一致）", "model_version": "字符串",
+             "model_sha256": "模型文件 SHA-256（与卡片一致，偏离记录 deviations）",
              "settings_screenshot": "settings.png"},
             {"interpretation": "引擎对 stem 重跑 spectral/beatgrid；结果按双轨合并",
              "note": "分离伪迹 ≠ 生成痕迹；分离模型自身会引入伪迹，任何 stem 异常先与模型基线比对"},
             "声部级取证（全混音无法定位的疑点）",
             blinded=blinded, extra={"file_sha256": sha}))
 
-    # Hypothesis-blinded operator views: attach AFTER all cards are built.
+    # Identity stamps AFTER all cards are built: instance ids distinguish
+    # repeated rounds of the same task type on one file.
+    from .submission import card_fingerprint
+    for c in cards:
+        c["task_instance_id"] = f"{c['task_id']}-{c['file_sha256'][:8]}"
+        c["card_sha256"] = card_fingerprint(c)
+
+    # Hypothesis-blinded operator views: attach AFTER identity stamps.
     if blinding_level == "hypothesis":
         for c in cards:
             c["operator_view"] = _operator_view(c)

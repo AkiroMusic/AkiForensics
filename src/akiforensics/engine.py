@@ -23,7 +23,8 @@ def analyze_single(path: str | Path, cfg: dict | None = None,
     # NATIVE rate + float working copies — resampling or 16-bit truncation
     # would manufacture artifacts the forensic legs would then measure.
     sr_native = int(audio["sample_rate"])
-    sr, stereo, mono = decode.decode_work(path, sample_rate=sr_native)
+    sr, stereo, mono = decode.decode_work(path, sample_rate=sr_native,
+                                          channels=audio.get("channels"))
     spec = spectral.analyze(mono, sr, cfg["spectral"])
     beats = beatgrid.analyze(mono, sr, cfg["beatgrid"])
     verd = verdict.aggregate(meta, spec, beats, meta.get("container", ""), cfg)

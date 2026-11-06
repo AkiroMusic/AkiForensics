@@ -50,6 +50,8 @@ def _fit_grid(kt: np.ndarray, T: float, ph: float, tol_ms: float = 35.0,
         r = np.abs(((kt - ph + T / 2) % T) - T / 2)
         sel = r < tol_ms
         ts, ks = kt[sel], np.round((kt[sel] - ph) / T)
+        if len(ts) < 2:  # empty/degenerate selection (e.g. pure-noise input)
+            return np.array([]), np.array([]), T, ph
         for _ in range(5):
             T, ph = np.polyfit(ks, ts, 1)
             res = (ts - (ph + ks * T)) * 1000.0
@@ -57,6 +59,8 @@ def _fit_grid(kt: np.ndarray, T: float, ph: float, tol_ms: float = 35.0,
             if ok.all():
                 break
             ts, ks = ts[ok], ks[ok]
+            if len(ts) < 2:  # rejection emptied the fit set
+                return np.array([]), np.array([]), T, ph
         if len(ts) < 10:
             break
     return ts, ks, T, ph
@@ -156,7 +160,7 @@ def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
 
     ts, ks, T, ph = _fit_grid(kt, T, ph)
     if len(ts) < 10:
-        na["reason"] = "grid fit collapsed"
+        na["reason"] = "no coherent kick grid (grid fit collapsed)"
         return na
 
     ks_r, t_ref, quals = _xcorr_refine(kb, sr, ks, T, ph)

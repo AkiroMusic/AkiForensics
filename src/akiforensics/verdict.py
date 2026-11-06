@@ -20,7 +20,14 @@ _ALT_AI_CONVERGENT = [
     "unquantized live performance + lossy transcode of a human master "
     "(构造性反例路径：实录底鼓 + 人工母带走有损交付)",
 ]
-_ALT_AI_TIMING_ONLY = _ALT_AI_CONVERGENT
+_ALT_AI_TIMING_ONLY = [
+    "unquantized live performance by human musicians "
+    "(真人未量化实录同样产生时序变异)",
+    "kick-detection or grid-fit error on syncopated material "
+    "(同步切分素材上的底鼓检测/网格拟合误差)",
+    "genre outside the model's applicability "
+    "(曲风超出时序链适用范围)",
+]
 _ALT_HUMAN = [
     "loop/sampler-based AI-hybrid production can also be sample-locked "
     "(采样器/loop 式 AI 混合制作同样锁格)",
@@ -123,10 +130,11 @@ def aggregate(metadata: dict, spectral: dict, beatgrid: dict,
     bg, sp, md = legs["beatgrid"]["verdict"], legs["spectral"]["verdict"], legs["metadata"]["verdict"]
     version = cfg["meta"]["version"]
 
-    # Delivery-chain vote: spectral fingerprint is primary; metadata INTEGRITY
-    # anomalies corroborate (same processing chain). Packaging/provenance
-    # flags never vote.
-    delivery_anomaly = sp == "lossy_source_fingerprint" or md == "integrity_anomalies"
+    # Convergence requires the SPECTRAL fingerprint: metadata INTEGRITY
+    # anomalies may be corruption/editing, not transcoding — they can raise a
+    # standalone DELIVERY_CHAIN_ANOMALY but must never upgrade to CONVERGENT.
+    delivery_anomaly = sp == "lossy_source_fingerprint"
+    integrity_anomaly = md == "integrity_anomalies"
 
     if bg == "timing_variation" and delivery_anomaly:
         verdict = "AI_EVIDENCE_CONVERGENT"
@@ -139,16 +147,18 @@ def aggregate(metadata: dict, spectral: dict, beatgrid: dict,
         positive = "timing variability (audio-intrinsic) without delivery-chain corroboration"
         alternatives = _ALT_AI_TIMING_ONLY
         human_gate = False
-    elif bg == "timing_locked" and sp in ("no_anomaly_detected", "na") and md == "clean":
+    elif bg == "timing_locked" and sp == "no_anomaly_detected" and md == "clean":
         verdict = "LIKELY_HUMAN"
-        positive = ("sample-locked grid + full-band spectrum + clean metadata "
+        positive = ("sample-locked grid + MEASURED full-band spectrum + clean metadata "
                     "(production-consistency evidence, not authorship proof)")
         alternatives = _ALT_HUMAN
         human_gate = False
-    elif delivery_anomaly:
+    elif delivery_anomaly or integrity_anomaly:
         verdict = "DELIVERY_CHAIN_ANOMALY"
-        positive = ("delivery-chain anomaly only; commonly a transcode of a human OR "
-                    "an AI master — timing leg gave no evidence")
+        why = ("spectral lossy-source fingerprint" if delivery_anomaly
+              else "metadata integrity anomalies (corruption/editing possible)")
+        positive = (f"{why} only; commonly a transcode of a human OR an AI master — "
+                    "timing leg gave no evidence")
         alternatives = []
         human_gate = False
     else:
@@ -160,5 +170,8 @@ def aggregate(metadata: dict, spectral: dict, beatgrid: dict,
     return {"verdict": verdict, "positive_evidence": positive,
             "alternative_hypotheses": alternatives,
             "human_gate_recommended": human_gate,
+            "calibration_status": "preliminary",
+            "human_reference_status": "insufficient",
+            "probability_calibrated": False,
             "legs": legs, "delivery_chain_fused": True,
             "threshold_version": version, "disclaimer": _disclaimer(version)}

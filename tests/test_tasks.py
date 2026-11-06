@@ -26,8 +26,8 @@ def _build_analysis(fxd: fx.FixtureDir, wall: bool, jitter: bool) -> dict:
                                wander_ms=2.0 if jitter else 0.0, dur=60)
     noise = fx.render_band_noise(fxd.dir / (("walled" if wall else "full") + "_n.wav"),
                                  cutoff_hz=20500 if wall else None)
-    sr, _st, m_k = decode.decode_work(str(wav), sample_rate=44100)
-    sr_n, _st, m_n = decode.decode_work(str(noise), sample_rate=44100)
+    sr, _st, m_k = decode.decode_work(str(wav), sample_rate=44100, channels=2)
+    sr_n, _st, m_n = decode.decode_work(str(noise), sample_rate=44100, channels=2)
     beats = beatgrid.analyze(m_k, sr, CFG["beatgrid"])
     spec = spectral.analyze(m_n, sr_n, CFG["spectral"])
     meta = {"flags": [], "platform_fingerprint": [], "vendor": "libFLAC",
@@ -108,7 +108,8 @@ class TaskCardTests(unittest.TestCase):
         self.assertIn("UVR-001", ids)
         self.assertIn("PA-001", ids)
         uvr = next(t for t in cards if t["task_id"] == "UVR-001")
-        self.assertIn("固定模型", " ".join(uvr["steps_zh"]))
+        self.assertIn("使用任务指定的模型", " ".join(uvr["steps_zh"]))
+        self.assertIn("model_sha256", uvr["record_fields"])
         self.assertIn("分离伪迹", uvr["acceptance"]["note"])
 
     def test_file_sha256_recorded(self):

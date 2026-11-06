@@ -72,10 +72,10 @@ AKIFORENSICS_CASE_FILE="D:\refs\confirmed_human\track.flac" AKIFORENSICS_EXPECT=
 
 ## Calibration status · 校准状态
 
-- Current version (see `config/thresholds.toml [meta].version` for the single source of truth): thresholds from one confirmed AI case (private reference sample, 2026-11-05) + a 7-track real Suno WAV reference set (7/7 brick wall at ~20.1 kHz; timing std 1.3–3.4 ms where measurable) + DAW physics for the human side. Human-side bounds are generous to avoid false accusations.
+- Current version (see `config/thresholds.toml [meta].version` for the single source of truth): thresholds from one confirmed AI case (private reference sample, 2026-11-05) + a 7-track **Suno Reference Set** (NOT a general AI-music set; 7/7 brick wall at ~20.1 kHz; timing std 1.3–3.4 ms where measurable) + DAW physics for the human side. Human-side bounds are generous to avoid false accusations.
 - Next: render a human reference set from your own DAW (quantized / unquantized, several tempi) and collect known AI output, then `calibrate` → bump threshold version.
 
-- 当前版本（以 `config/thresholds.toml [meta].version` 为唯一事实源）：阈值来自单一确认 AI 案例（私有参考样本，2026-11-05）+ 7 首真实 Suno WAV 参考集（7/7 检出 ~20.1 kHz 砖墙；可测时序 std 1.3–3.4 ms）+ 人类侧物理先验。人类侧阈值刻意放宽以避免冤枉真人作品。
+- 当前版本（以 `config/thresholds.toml [meta].version` 为唯一事实源）：阈值来自单一确认 AI 案例（私有参考样本，2026-11-05）+ 7 首 **Suno Reference Set**（非通用 AI 音乐参考集；7/7 检出 ~20.1 kHz 砖墙；可测时序 std 1.3–3.4 ms）+ 人类侧物理先验。人类侧阈值刻意放宽以避免冤枉真人作品。
 - 下一步：用你自己的 DAW 渲染人类参考集（量化/不量化、多个速度），收集已知 AI 曲，跑 `calibrate` → 升级阈值版本号。
 
 ## Known limits · 已知局限
@@ -87,6 +87,13 @@ AKIFORENSICS_CASE_FILE="D:\refs\confirmed_human\track.flac" AKIFORENSICS_EXPECT=
 - 断裂型 kick pattern（two-step、ghost kick）通过**主 kick 簇选择**处理：网格只拟合最强且相位一致的簇（通常是小节头主 kick），不同结构位置绝不混拟；报告 BPM 折叠到音乐区间（自动解网格次谐波）。无一致主导簇的完全碎节奏（如 jungle）仍回退 `N/A`。
 - 有损截止墙本身不能证明 AI——人类也会走 MP3 母带。它是收敛证据，不是判决。
 - 生成式模型在进化；阈值是带版本号的配置，每份报告都携带其校准来源。
+
+## Versioning · 版本体系
+
+Three independent version tracks — do not conflate 三个独立版本轨道，勿混用:
+- **Software**: package version (`pyproject.toml` / `__init__.py`)
+- **Evidence protocol**: task-card protocol (`tasks.PROTOCOL`, current 1.0)
+- **Thresholds**: calibration version (`config/thresholds.toml [meta].version`, current v0-n1.1)
 
 ## Repo layout · 目录结构
 
