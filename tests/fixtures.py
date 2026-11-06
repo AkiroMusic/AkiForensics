@@ -27,21 +27,33 @@ def _kick(t0: np.ndarray, sr: int, n: int) -> np.ndarray:
 
 def render_kick_track(path: Path, bpm: float = 128.0, dur: float = 60.0,
                       jitter_ms: float = 0.0, wander_ms: float = 0.0,
-                      seed: int = 7) -> Path:
+                      seed: int = 7, pattern: str = "house") -> Path:
     """Kick grid at `bpm`. jitter_ms = per-hit gaussian offset; wander_ms =
-    amplitude of a slow sinusoidal timing drift (generative-style)."""
+    amplitude of a slow sinusoidal timing drift (generative-style).
+    pattern="house": kick on every beat. pattern="twostep": strong kick on
+    each downbeat + weaker ghost kick at beat 1.5 of the bar (broken pattern)."""
     rng = np.random.default_rng(seed)
     sr = SR
     n = int(dur * sr)
     T = 60.0 / bpm
-    t0 = np.arange(T / 2, dur - 0.3, T)
-    exact = np.round(t0 * sr) / sr                      # sample-locked grid
-    t0s = exact.copy()
-    if jitter_ms:
-        t0s = t0s + rng.normal(0, jitter_ms / 1000.0, len(t0s))
-    if wander_ms:
-        t0s = t0s + (wander_ms / 1000.0) * np.sin(2 * np.pi * t0s / 9.0)
-    y = _kick(np.clip(t0s, 0, dur - 0.3), sr, n)
+
+    def place(t0: np.ndarray) -> np.ndarray:
+        exact = np.round(t0 * sr) / sr                      # sample-locked grid
+        t0s = exact.copy()
+        if jitter_ms:
+            t0s = t0s + rng.normal(0, jitter_ms / 1000.0, len(t0s))
+        if wander_ms:
+            t0s = t0s + (wander_ms / 1000.0) * np.sin(2 * np.pi * t0s / 9.0)
+        return np.clip(t0s, 0, dur - 0.3)
+
+    if pattern == "twostep":
+        bar = T * 4
+        mains = np.arange(bar, dur - 0.3, bar)
+        ghosts = mains + 1.5 * T
+        y = _kick(place(mains), sr, n) + 0.55 * _kick(place(ghosts), sr, n)
+    else:
+        t0 = np.arange(T / 2, dur - 0.3, T)
+        y = _kick(place(t0), sr, n)
     y += rng.normal(0, 3e-3, n)                         # noise floor
     x = np.stack([y, y], axis=1)
     x = np.clip(x, -1, 1)

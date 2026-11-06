@@ -13,6 +13,7 @@ residual_std_human_ms = 0.6     # below this => sample-locked (quantized DAW ren
 pct03_human_min = 70.0          # % of beats within +-0.3 ms expected for sample-locked
 pct03_ai_max = 30.0             # % within +-0.3 ms above which AI-consistency weakens
 min_kicks = 40                  # refined beats required to judge the timing leg
+min_kicks_cluster = 24          # relaxed floor when judging on the main-kick cluster only
 min_coverage = 0.40             # refined beats must span this fraction of the track
 common_edm_bpm = [120, 124, 126, 128, 130, 132, 134, 136, 138, 140, 142, 144, 145, 150, 160, 170, 174, 175]
 

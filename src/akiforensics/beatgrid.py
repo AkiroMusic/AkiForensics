@@ -106,19 +106,54 @@ def _xcorr_refine(kb: np.ndarray, sr: int, ks: np.ndarray,
     return ks_ok[good], (ph + ks_ok[good] * T) + lags[good] / 1000.0, quals[good]
 
 
+def _select_main_cluster(kt: np.ndarray, kh: np.ndarray, T: float,
+                         tol_s: float = 0.035) -> np.ndarray:
+    """Main-kick cluster selection for broken kick patterns (two-step etc.).
+
+    Kicks at different structural positions of a bar (downbeat vs syncopated
+    ghost kicks) must NOT be mixed into one grid fit: in a DAW render each
+    position is sample-locked but at a different phase, so mixing inflates
+    residuals and would fake timing variation. Cluster by phase modulo the
+    beat period, weighted by kick strength; the strongest coherent cluster is
+    the main kick (downbeat). Any coherent cluster works for the verdict —
+    quantized positions stay locked wherever they sit.
+    """
+    nbins = 128
+    hist = np.zeros(nbins)
+    idx = (((kt + T / 2) % T) / T * nbins).astype(int) % nbins
+    for i, h in zip(idx, kh):
+        hist[i] += h
+    b = int(hist.argmax())
+    center = (b + 0.5) / nbins * T - T / 2
+    r = np.abs(((kt - center + T / 2) % T) - T / 2)
+    return kt[r < tol_s]
+
+
 def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
     duration = len(mono) / sr
-    kt, (kb, _h) = _kick_candidates(mono, sr)
+    kt_all, (kb, kh) = _kick_candidates(mono, sr)
     na = {"applicable": False, "reason": None}
 
-    if len(kt) < max(20, cfg["min_kicks"] // 2):
-        na["reason"] = f"too few kick candidates ({len(kt)})"
+    if len(kt_all) < max(20, cfg["min_kicks"] // 2):
+        na["reason"] = f"too few kick candidates ({len(kt_all)})"
         return na
 
-    T, ph = _scan_grid(kt, 60.0, 200.0, 0.25)
+    T, ph = _scan_grid(kt_all, 60.0, 200.0, 0.25)
     # fine scan +-0.5 % around coarse tempo
     bpm0 = 60.0 / T
-    T, ph = _scan_grid(kt, bpm0 * 0.995, bpm0 * 1.005, 0.002, n_phase_bins=160)
+    T, ph = _scan_grid(kt_all, bpm0 * 0.995, bpm0 * 1.005, 0.002, n_phase_bins=160)
+
+    # main-kick cluster selection (prevents mixing structural positions in
+    # broken patterns; harmless for house-style every-beat kicks)
+    kt = _select_main_cluster(kt_all, kh, T)
+    mode = "main-cluster"
+    if len(kt) < cfg.get("min_kicks_cluster", 24):
+        kt = kt_all
+        mode = "all"
+    if len(kt) < 10:
+        na["reason"] = "no coherent kick cluster"
+        return na
+
     ts, ks, T, ph = _fit_grid(kt, T, ph)
     if len(ts) < 10:
         na["reason"] = "grid fit collapsed"
@@ -134,7 +169,15 @@ def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
         ks_r, t_ref = ks_r[ok], t_ref[ok]
     T2, p2 = np.polyfit(ks_r, t_ref, 1)
     res = (t_ref - (p2 + ks_r * T2)) * 1000.0
-    bpm = 60.0 / T2
+    bpm_grid = 60.0 / T2
+    # With main-kick-only fitting the grid may sit on a sub-harmonic (e.g.
+    # downbeats on a half-bar grid). Fold into the musical range [90, 180) for
+    # reporting and the integer-BPM distance; residuals are unaffected.
+    bpm = float(bpm_grid)
+    while bpm < 90.0:
+        bpm *= 2.0
+    while bpm >= 180.0:
+        bpm /= 2.0
     span = (ks_r.max() - ks_r.min()) * T2
     coverage = span / duration if duration else 0.0
     t_abs = p2 + ks_r * T2
@@ -156,14 +199,18 @@ def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
     ma = np.convolve(res, np.ones(8) / 8, "same")
     dist_int = min(abs(bpm - b) for b in cfg.get("common_edm_bpm", []))
 
-    applicable = len(ks_r) >= cfg["min_kicks"] and coverage >= cfg["min_coverage"]
+    applicable = len(ks_r) >= (cfg["min_kicks"] if mode == "all" else cfg.get("min_kicks_cluster", 24)) \
+        and coverage >= cfg["min_coverage"]
     out = {
         "applicable": bool(applicable),
         "reason": None if applicable else (
-            f"insufficient beats ({len(ks_r)} < {cfg['min_kicks']})"
-            if len(ks_r) < cfg["min_kicks"] else
-            f"grid coverage too low ({coverage:.2f} < {cfg['min_coverage']})"),
+            f"insufficient beats ({len(ks_r)})"
+            if len(ks_r) < (cfg["min_kicks"] if mode == "all" else cfg.get("min_kicks_cluster", 24))
+            else f"grid coverage too low ({coverage:.2f} < {cfg['min_coverage']})"),
+        "kick_selection": {"mode": mode, "n_candidates": int(len(kt_all)),
+                           "n_selected": int(len(kt))},
         "bpm": round(float(bpm), 4),
+        "bpm_grid_raw": round(float(bpm_grid), 4),
         "bpm_integer_distance": round(float(dist_int), 3),
         "n_beats_refined": int(len(ks_r)),
         "coverage": round(float(coverage), 3),

@@ -74,6 +74,49 @@ class BeatGridTests(unittest.TestCase):
         self.assertIn("unquantized live playing", g["interpretation_en"])
 
 
+class TwoStepPatternTests(unittest.TestCase):
+    """Broken kick patterns (two-step): the main-kick cluster (downbeat) is the
+    standard; ghost/syncopated kicks must not pollute the grid fit."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fx = fx.FixtureDir()
+        cls.locked = fx.render_kick_track(cls.fx.dir / "ts_locked.wav", bpm=136,
+                                          jitter_ms=0, wander_ms=0, dur=90,
+                                          pattern="twostep")
+        cls.jittered = fx.render_kick_track(cls.fx.dir / "ts_jit.wav", bpm=136,
+                                            jitter_ms=3.0, wander_ms=2.0, dur=90,
+                                            pattern="twostep")
+        sr, m1 = decode.decode_work(str(cls.locked), sample_rate=44100)
+        _, m2 = decode.decode_work(str(cls.jittered), sample_rate=44100)
+        cls.res_lock = beatgrid.analyze(m1, sr, CFG["beatgrid"])
+        cls.res_jit = beatgrid.analyze(m2, sr, CFG["beatgrid"])
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.fx.cleanup()
+
+    def test_locked_twostep_is_locked_on_main_cluster(self):
+        r = self.res_lock
+        self.assertTrue(r["applicable"], r.get("reason"))
+        self.assertEqual(r["kick_selection"]["mode"], "main-cluster")
+        self.assertLess(r["kick_selection"]["n_selected"],
+                        r["kick_selection"]["n_candidates"])
+        self.assertLess(r["residual_std_ms"], 0.5)
+        self.assertGreater(r["pct_within_0.3ms"], 70.0)
+        self.assertAlmostEqual(r["bpm"], 136.0, delta=0.2)
+
+    def test_jittered_twostep_shows_variation(self):
+        r = self.res_jit
+        self.assertTrue(r["applicable"], r.get("reason"))
+        self.assertGreater(r["residual_std_ms"], 1.5)
+        self.assertLess(r["pct_within_0.3ms"], 30.0)
+
+    def test_locked_twostep_grades_timing_locked(self):
+        g = verdict._grade_beatgrid(self.res_lock, CFG)
+        self.assertEqual(g["verdict"], "timing_locked")
+
+
 class SpectralTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -80,11 +80,11 @@ AKIFORENSICS_CASE_FILE="D:\refs\confirmed_human\track.flac" AKIFORENSICS_EXPECT=
 
 ## Known limits · 已知局限
 
-- Timing leg applies to steady-kick genres (EDM/pop/dance). Ballads, rock, orchestral ⇒ leg A `N/A`; verdict falls back to B+C evidence only.
+- Broken kick patterns (two-step, ghost kicks) are handled via **main-kick cluster selection**: the grid is fitted on the strongest coherent phase cluster (typically the downbeat kick) so structural positions are never mixed; reported BPM is folded into the musical range (grid sub-harmonics resolved). Fully broken rhythms with no consistent dominant cluster (e.g. jungle) still fall back to `N/A`.
 - A lossy-cutoff wall alone does **not** prove AI — humans bounce through MP3 too. It is convergence evidence, not a verdict.
 - Generative models improve; thresholds are versioned config, and every report carries its provenance.
 
-- 时序链仅适用于稳定底鼓曲风（EDM/流行/舞曲）。抒情、摇滚、管弦 ⇒ A 链 `N/A`，判定退化为 B+C 证据。
+- 断裂型 kick pattern（two-step、ghost kick）通过**主 kick 簇选择**处理：网格只拟合最强且相位一致的簇（通常是小节头主 kick），不同结构位置绝不混拟；报告 BPM 折叠到音乐区间（自动解网格次谐波）。无一致主导簇的完全碎节奏（如 jungle）仍回退 `N/A`。
 - 有损截止墙本身不能证明 AI——人类也会走 MP3 母带。它是收敛证据，不是判决。
 - 生成式模型在进化；阈值是带版本号的配置，每份报告都携带其校准来源。
 

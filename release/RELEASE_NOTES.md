@@ -2,6 +2,12 @@
 
 Evidence-model v2 + Human-in-the-Loop task cards (protocol 1.0). Threshold provenance unchanged: `v0-n1` (single confirmed case).
 
+## Main-kick cluster selection (broken patterns)
+
+- Grid fitting now runs on the **strongest coherent kick cluster** (phase-clustered, strength-weighted — typically the downbeat kick) instead of all kick candidates: two-step / ghost-kick patterns are judged without mixing structural positions, which would fake timing variation in DAW renders.
+- `kick_selection` field reports mode (`main-cluster` / `all`) and candidate/selected counts; relaxed beat floor (`min_kicks_cluster = 24`) since main kicks occur once per bar.
+- Reported BPM folds grid sub-harmonics into the musical range [90, 180) (`bpm` + `bpm_grid_raw`); integer-BPM distance uses the folded value. Residual statistics are unaffected by the fold.
+
 ## Evidence model v2 (breaking vocabulary change)
 
 - Legs now report measurements, not attributions: `timing_locked` / `timing_variation` / `no_anomaly_detected` / `lossy_source_fingerprint` / `anomalies_present` / `clean` / `na`.
