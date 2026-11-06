@@ -1,11 +1,17 @@
 # AkiForensics detection thresholds
-# Calibration provenance: v0-n1 — derived from ONE confirmed AI case
-# (private reference sample, 2026-11-05) plus first-principles DAW physics.
+# Calibration provenance:
+#   v0-n1.1 — human side: physics-based bounds (quantized DAW render = sample-
+#             locked; unquantized live playing admitted as confounder).
+#             AI side: 7 real Suno WAV originals (commercial demos, 2026-11-07):
+#             brick wall 7/7 at 20,080-20,180 Hz + codec noise-bed breathing
+#             10.75-15.01 dB; timing std (where measurable) 1.32-3.40 ms, all
+#             above the human bound, none near 0.6. Thresholds unchanged at
+#             this n; revisit at corpus >= 20 per class.
 # Treat binary verdicts as evidence-weighted, not ground truth, until `calibrate`
 # has been run against a human/AI reference corpus.
 
 [meta]
-version = "v0-n1"
+version = "v0-n1.1"
 
 [beatgrid]
 residual_std_ai_ms = 1.5        # grid residual std above this => generative-grade wander
@@ -13,7 +19,7 @@ residual_std_human_ms = 0.6     # below this => sample-locked (quantized DAW ren
 pct03_human_min = 70.0          # % of beats within +-0.3 ms expected for sample-locked
 pct03_ai_max = 30.0             # % within +-0.3 ms above which AI-consistency weakens
 min_kicks = 40                  # refined beats required to judge the timing leg
-min_kicks_cluster = 24          # relaxed floor when judging on the main-kick cluster only
+min_kicks_cluster = 16          # relaxed floor for main-kick-only fitting (empirical: Suno sparse patterns yield ~20 downbeats in ~3 min)
 min_coverage = 0.40             # refined beats must span this fraction of the track
 common_edm_bpm = [120, 124, 126, 128, 130, 132, 134, 136, 138, 140, 142, 144, 145, 150, 160, 170, 174, 175]
 
