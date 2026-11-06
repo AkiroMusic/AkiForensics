@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -36,7 +37,8 @@ def cmd_analyze(args) -> int:
     for fp in files:
         outdir = outroot / fp.stem if batch else outroot / (fp.stem + "_report")
         try:
-            r = analyze_single(fp, cfg)
+            r = analyze_single(fp, cfg, blinding_level=args.blinding,
+                               force_tasks=tuple(args.task or ()))
         except Exception as e:  # keep batch running on a bad file
             print(f"[SKIP] {fp.name}: {e}")
             continue
@@ -49,6 +51,30 @@ def cmd_analyze(args) -> int:
     if batch and results:
         csv_path = report.write_batch_summary(results, outroot)
         print(f"batch summary: {csv_path}  index: {outroot / 'index.html'}")
+    return 0
+
+
+def cmd_merge_submission(args) -> int:
+    """Merge a returned human task sheet into an existing report.json."""
+    from . import submission
+    rpath = Path(args.report)
+    analysis = json.loads(rpath.read_text(encoding="utf-8"))
+    sub = submission.load_submission(args.submission)
+    card = next((t for t in analysis.get("manual_tasks", [])
+                 if t["task_id"] == sub.get("task_id")), None)
+    if card is None:
+        print(f"error: task {sub.get('task_id')} not in this report's manual_tasks")
+        return 2
+    merged = submission.merge(sub, analysis, card)
+    report.write_json(merged, rpath)
+    ev = merged["human_evidence"][-1]
+    print(f"merged {ev['task_id']}: summary={ev['summary']}")
+    for c in ev["comparisons"]:
+        print(f"  {c['field']}: engine={c['engine']} human={c['human']} "
+              f"tol={c['tolerance']} -> {c['result']}")
+    if ev["summary"] == "contradiction":
+        print("  NOTE: contradiction recorded — issue a follow-up task "
+              "(different segment / second tool); never overwrite either side.")
     return 0
 
 
@@ -69,7 +95,17 @@ def main(argv=None) -> int:
     a.add_argument("--config", help="thresholds.toml override")
     a.add_argument("--full", action="store_true",
                    help="render per-file HTML in batch mode")
+    a.add_argument("--blinding", choices=("value", "hypothesis", "none"),
+                   default="value", help="task-card blinding level (default value)")
+    a.add_argument("--task", action="append",
+                   help="force stage-2 task cards (repeatable: --task UVR-001)")
     a.set_defaults(func=cmd_analyze)
+
+    m = sub.add_parser("merge-submission",
+                       help="merge a returned human task sheet into report.json")
+    m.add_argument("report", help="path to report.json")
+    m.add_argument("submission", help="path to the returned submission JSON")
+    m.set_defaults(func=cmd_merge_submission)
 
     c = sub.add_parser("calibrate",
                        help="EXPERIMENTAL: suggest thresholds from reference corpora")

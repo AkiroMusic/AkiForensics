@@ -32,10 +32,9 @@ def probe(path: str) -> dict:
 
 def decode_pcm(path: str, sample_rate: int | None = None,
                channels: int | None = None,
-               sample_fmt: str = "s16le") -> tuple[int, np.ndarray]:
+               sample_fmt: str = "s16le") -> bytes:
     """Decode first audio stream to raw interleaved PCM bytes.
 
-    Returns (sample_rate, flat_int8-viewable buffer as np.ndarray of uint8).
     sample_rate/channels=None keeps the source layout (needed for FLAC MD5).
     """
     cmd = [_bin("ffmpeg"), "-v", "error", "-i", path, "-map", "0:a:0",
@@ -51,20 +50,24 @@ def decode_pcm(path: str, sample_rate: int | None = None,
     return proc.stdout
 
 
-def decode_work(path: str, sample_rate: int | None = None) -> tuple[int, np.ndarray]:
-    """Decode to float64 mono for analysis pipelines.
+def decode_work(path: str, sample_rate: int,
+                sample_fmt: str = "f32le") -> tuple[int, np.ndarray, np.ndarray]:
+    """Decode to float working copies for analysis pipelines.
 
-    sample_rate=None keeps the NATIVE rate (preferred: resampling manufactures
-    artifacts the forensic legs would then measure). The caller learns the
-    effective rate from ffprobe and passes it back explicitly.
+    Float PCM preserves 24-bit sources (s16le would quantize them); native
+    channel count is kept and BOTH stereo and a mono downmix are returned —
+    future stereo/mid-side forensics must not use the averaged signal.
+    Returns (sample_rate, stereo float64 [n, ch], mono float64 [n]).
     """
-    raw = decode_pcm(path, sample_rate=sample_rate, channels=2, sample_fmt="s16le")
-    x = np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
-    x = x.reshape(-1, 2).mean(axis=1)
-    if sample_rate is None:
-        raise ValueError("decode_work needs the effective sample rate; "
-                         "pass the stream's rate from probe()")
-    return int(sample_rate), x
+    channels = 2  # ffmpeg -ac 2 collapses >2 layouts; stereo is the norm here
+    raw = decode_pcm(path, sample_rate=sample_rate, channels=channels,
+                     sample_fmt=sample_fmt)
+    dt = {"f32le": "<f4", "s16le": "<i2", "s32le": "<i4"}[sample_fmt]
+    x = np.frombuffer(raw, dtype=dt).astype(np.float64)
+    if sample_fmt == "s16le":
+        x /= 32768.0
+    stereo = x.reshape(-1, channels)
+    return int(sample_rate), stereo, stereo.mean(axis=1)
 
 
 def decode_errors(path: str) -> list[str]:

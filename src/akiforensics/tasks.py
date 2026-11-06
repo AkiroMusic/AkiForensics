@@ -4,14 +4,17 @@ Design rules (docs/HUMAN_WORKFLOW.md):
 - Cards are generated deterministically from analysis results: the same
   analysis always yields the same cards (segment positions are computed,
   never "pick a stable part").
-- Blinded by default: a card NEVER contains the engine's own measurement
-  values, so the human measures independently and anchoring bias is cut.
-  The comparison happens after return, on both records.
+- Blinding levels: "value" (default; card shows the hypothesis but never the
+  engine's own numbers), "hypothesis" (card also strips hypothesis/evidence-
+  gap/acceptance into an operator_view — the operator measures without
+  knowing what is suspected), "none" (open mode for对照 runs). The
+  dual-track comparison happens after return, on both records.
 - Cards target evidence gaps: a task is issued only if its outcome can move
   the verdict. Max 3 auto cards per round; stage-2 cards (UVR-001) are
   generated on demand after stage-1 flags.
 
-任务卡生成（协议 1.0）。三原则：确定性分段、默认盲化、按证据缺口发卡。
+任务卡生成（协议 1.0）。原则：确定性分段、盲化分级（value/hypothesis/none）、
+按证据缺口发卡、验收可证伪。
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from pathlib import Path
 import numpy as np
 
 PROTOCOL = "1.0"
+BLINDING_LEVELS = ("value", "hypothesis", "none")
 
 
 def _sha256(path: str) -> str:
@@ -102,14 +106,29 @@ def _card(task_id, tool, segment, hypothesis_zh, hypothesis_en, steps, record,
     return card
 
 
+def _operator_view(card: dict) -> dict:
+    """Hypothesis-blinded projection: measurement task only — no hypothesis,
+    no evidence gap, no acceptance wording that hints at what is suspected."""
+    return {"task_id": card["task_id"], "protocol": card["protocol"],
+            "tool": card["tool"], "segment": card["segment"],
+            "steps_zh": card["steps_zh"], "record_fields": card["record_fields"],
+            "instruction_zh": ("请按步骤独立完成测量并如实记录；不要向 AI 询问任何预期值，"
+                               "也不要根据既往分析推测目标结果。"),
+            "file_sha256": card.get("file_sha256")}
+
+
 def generate_tasks(analysis: dict, blinded: bool = True,
+                   blinding_level: str = "value",
                    force: tuple[str, ...] = ()) -> list[dict]:
     """Auto cards target evidence gaps; `force` adds on-demand stage-2 cards."""
+    if blinding_level not in BLINDING_LEVELS:
+        raise ValueError(f"blinding_level must be one of {BLINDING_LEVELS}")
+    blinded = blinding_level != "none"
     duration = float(analysis["metadata"].get("duration_s") or 0) or \
         float(analysis.get("file", {}).get("duration_s") or 0)
     legs = analysis["verdict"]["legs"]
     sp, bg, md = legs["spectral"], legs["beatgrid"], legs["metadata"]
-    sha = _sha256(analysis["file"]["path"])
+    sha = analysis["file"].get("sha256") or _sha256(analysis["file"]["path"])
     cards: list[dict] = []
 
     # RX-001 — cutoff verification (only when a wall was detected)
@@ -136,8 +155,9 @@ def generate_tasks(analysis: dict, blinded: bool = True,
              "wall_stable_across_subsegments": "yes / no",
              "lr_consistent": "yes / no", "above_wall_silence": "yes / no / partial",
              "rx_version": "字符串", "screenshots": ["spectrogram.png", "spectrum_L.png", "spectrum_R.png"]},
-            {"confirm": "墙存在、三个子段稳定（±200 Hz）且 L/R 一致 → 支持有损源指纹",
-             "refute": "无墙，或子段间截止漂移 >500 Hz → 推翻有损源指纹",
+            {"confirm": "墙存在、三个子段稳定（±200 Hz）且 L/R 一致 → 确认稳定高频边界存在"
+                        "（与有损转码兼容；母带低通/硬件频限仍可能，需 RX-003 多分辨率对照排除）",
+             "refute": "无墙，或子段间截止漂移 >500 Hz → 推翻转码假设",
              "undetermined": "边界模糊无法测量"},
             "可改变 spectral 链结论（确证/推翻有损源指纹）",
             blinded=blinded,
@@ -167,9 +187,17 @@ def generate_tasks(analysis: dict, blinded: bool = True,
                 "为 timing 变异补充上下文证据",
                 blinded=blinded, extra={"file_sha256": sha, "beat_times": beats}))
 
-    # DAW-001 — structured listening checklist (final gate for clean-looking tracks)
-    if bg["verdict"] == "timing_locked" and sp["verdict"] in ("no_anomaly_detected", "na") \
-            and md["verdict"] == "clean":
+    # DAW-001 — structured listening gate: both for clean-looking tracks
+    # (final confirmation) and for convergent AI verdicts (alternative-
+    # hypothesis check: a human unquantized+transcode production should NOT
+    # show generative vocal artifacts).
+    convergent = analysis["verdict"]["verdict"] == "AI_EVIDENCE_CONVERGENT"
+    clean_track = (bg["verdict"] == "timing_locked"
+                   and sp["verdict"] in ("no_anomaly_detected", "na")
+                   and md["verdict"] == "clean")
+    if convergent or clean_track:
+        gap = ("收敛判定的听感终审：排查替代假设（实录+转码的人工曲不应有人声生成伪影）"
+               if convergent else "自动链全净时的最终确认门")
         cards.append(_card(
             "DAW-001",
             {"name": "任意 DAW / 播放器 + 耳机", "module": "人工听检", "version": "n/a"},
@@ -196,7 +224,7 @@ def generate_tasks(analysis: dict, blinded: bool = True,
              "refute": "全部 no，或仅 ≤1 项非人声 yes → 听感层面无异常（低强度证据）",
              "undetermined": "多项 unsure，需换环境复听",
              "note": "听检为主观证据，永远不单独定来源"},
-            "自动链全净时的最终确认门",
+            gap,
             blinded=blinded, extra={"file_sha256": sha}))
 
     # PA-001 — Pure Analyzer realtime profile (descriptive, on demand or when locked)
@@ -244,5 +272,10 @@ def generate_tasks(analysis: dict, blinded: bool = True,
              "note": "分离伪迹 ≠ 生成痕迹；分离模型自身会引入伪迹，任何 stem 异常先与模型基线比对"},
             "声部级取证（全混音无法定位的疑点）",
             blinded=blinded, extra={"file_sha256": sha}))
+
+    # Hypothesis-blinded operator views: attach AFTER all cards are built.
+    if blinding_level == "hypothesis":
+        for c in cards:
+            c["operator_view"] = _operator_view(c)
 
     return cards

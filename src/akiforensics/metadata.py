@@ -16,6 +16,15 @@ BLOCK_NAMES = {0: "STREAMINFO", 1: "PADDING", 2: "APPLICATION", 3: "SEEKTABLE",
 KUGOU_FIELDS = ("KGHASH", "EXTEND", "QUALITY", "KRC")
 _FMT_FOR_BPS = {8: "u8", 16: "s16le", 24: "s24le", 32: "s32le"}
 
+# Flag families (evidence-model v2): only `integrity` flags feed the
+# delivery-chain vote; packaging/provenance are recorded as context.
+FLAG_FAMILIES = {
+    "integrity": {"md5_mismatch", "decoder_errors", "metadata_truncated",
+                  "metadata_read_error", "metadata_block_oversized"},
+    "packaging": {"picture_mime_mismatch"},
+    "provenance": {"platform_quality_tag_present"},
+}
+
 
 def _parse_streaminfo(si: bytes) -> dict:
     sr = (si[10] << 12) | (si[11] << 4) | (si[12] >> 4)
@@ -28,13 +37,25 @@ def _parse_streaminfo(si: bytes) -> dict:
 
 def _parse_vorbis_comment(vc: bytes) -> dict:
     p = 0
+    if len(vc) < 8:
+        return {"vendor": "?", "tags": {}, "malformed": True}
     vlen = int.from_bytes(vc[p:p + 4], "little"); p += 4
-    vendor = vc[p:p + vlen].decode("utf-8", "replace"); p += vlen
+    if vlen > len(vc) - p:
+        return {"vendor": "?", "tags": {}, "malformed": True}
+    vendor = vc[p:p + vlen].decode("utf-8", errors="replace"); p += vlen
+    if p + 4 > len(vc):
+        return {"vendor": vendor, "tags": {}, "malformed": True}
     cnt = int.from_bytes(vc[p:p + 4], "little"); p += 4
+    if cnt > 10_000:
+        return {"vendor": vendor, "tags": {}, "malformed": True}
     tags: dict[str, str] = {}
     for _ in range(cnt):
+        if p + 4 > len(vc):
+            return {"vendor": vendor, "tags": tags, "malformed": True}
         cl = int.from_bytes(vc[p:p + 4], "little"); p += 4
-        entry = vc[p:p + cl].decode("utf-8", "replace"); p += cl
+        if cl > len(vc) - p:
+            return {"vendor": vendor, "tags": tags, "malformed": True}
+        entry = vc[p:p + cl].decode("utf-8", errors="replace"); p += cl
         if "=" in entry:
             k, v = entry.split("=", 1)
             tags[k.upper()] = v
@@ -43,11 +64,25 @@ def _parse_vorbis_comment(vc: bytes) -> dict:
 
 def _picture_info(pic: bytes) -> dict:
     # FLAC PICTURE block: <32:type><32:mime_len><mime><32:desc_len><desc>...
+    if len(pic) < 8:
+        return {"declared_mime": "?", "actual_mime": "unknown",
+                "mime_mismatch": False, "malformed": True}
     mime_len = int.from_bytes(pic[4:8], "big")
-    mime = pic[8:8 + mime_len].decode("utf-8", "replace", errors="ignore")
+    if mime_len > 500 or 8 + mime_len > len(pic):
+        return {"declared_mime": "?", "actual_mime": "unknown",
+                "mime_mismatch": False, "malformed": True}
+    mime = pic[8:8 + mime_len].decode("utf-8", errors="replace")
     body_start = 8 + mime_len
+    if body_start + 4 > len(pic):
+        return {"declared_mime": mime, "actual_mime": "unknown",
+                "mime_mismatch": False, "malformed": True}
     desc_len = int.from_bytes(pic[body_start:body_start + 4], "big")
-    data_off = body_start + 4 + desc_len + 16
+    # FLAC PICTURE spec after desc: width/height/depth/colors (16 bytes)
+    # then dataLen (4 bytes), then the image data.
+    data_off = body_start + 4 + desc_len + 16 + 4
+    if data_off + 8 > len(pic):
+        return {"declared_mime": mime, "actual_mime": "unknown",
+                "mime_mismatch": False, "malformed": True}
     magic = pic[data_off:data_off + 8]
     if magic.startswith(b"\x89PNG"):
         actual = "image/png"
@@ -148,4 +183,8 @@ def analyze(path: str, probe_info: dict | None = None) -> dict:
                fmt_tags.get("ENCODERSETTINGS"))
     if enc_tag:
         out["encoder_tag"] = enc_tag
+    out["flag_families"] = {
+        fam: sorted(f for f in out["flags"] if f in flags_)
+        for fam, flags_ in FLAG_FAMILIES.items()
+    }
     return out

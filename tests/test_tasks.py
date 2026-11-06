@@ -26,8 +26,8 @@ def _build_analysis(fxd: fx.FixtureDir, wall: bool, jitter: bool) -> dict:
                                wander_ms=2.0 if jitter else 0.0, dur=60)
     noise = fx.render_band_noise(fxd.dir / (("walled" if wall else "full") + "_n.wav"),
                                  cutoff_hz=20500 if wall else None)
-    sr, m_k = decode.decode_work(str(wav), sample_rate=44100)
-    sr_n, m_n = decode.decode_work(str(noise), sample_rate=44100)
+    sr, _st, m_k = decode.decode_work(str(wav), sample_rate=44100)
+    sr_n, _st, m_n = decode.decode_work(str(noise), sample_rate=44100)
     beats = beatgrid.analyze(m_k, sr, CFG["beatgrid"])
     spec = spectral.analyze(m_n, sr_n, CFG["spectral"])
     meta = {"flags": [], "platform_fingerprint": [], "vendor": "libFLAC",
@@ -50,13 +50,32 @@ class TaskCardTests(unittest.TestCase):
 
     def test_gap_targeting_issues_right_cards(self):
         ids = [t["task_id"] for t in tasks.generate_tasks(self.rich)]
+        # rich = timing variation + wall => convergent: RX-001 + RX-002 + DAW-001 gate
         self.assertIn("RX-001", ids)
         self.assertIn("RX-002", ids)
-        self.assertNotIn("DAW-001", ids)  # not a clean-looking track
+        self.assertIn("DAW-001", ids)  # human gate for the convergent verdict
 
     def test_clean_track_gets_listening_gate(self):
         ids = [t["task_id"] for t in tasks.generate_tasks(self.clean)]
         self.assertEqual(ids, ["DAW-001"])
+
+    def test_blinding_levels(self):
+        for level in ("value", "hypothesis", "none"):
+            cards = tasks.generate_tasks(self.rich, blinding_level=level)
+            self.assertTrue(cards)
+        v = tasks.generate_tasks(self.rich, blinding_level="value")
+        self.assertTrue(all(c["blinded"] for c in v))
+        self.assertTrue(all("operator_view" not in c for c in v))
+        n = tasks.generate_tasks(self.rich, blinding_level="none")
+        self.assertTrue(all(not c["blinded"] for c in n))
+        h = tasks.generate_tasks(self.rich, blinding_level="hypothesis")
+        self.assertTrue(all(c["blinded"] and "operator_view" in c for c in h))
+        op = h[0]["operator_view"]
+        self.assertNotIn("hypothesis_zh", op)
+        self.assertNotIn("evidence_gap", op)
+        self.assertIn("steps_zh", op)
+        with self.assertRaises(ValueError):
+            tasks.generate_tasks(self.rich, blinding_level="bogus")
 
     def test_cards_are_deterministic(self):
         a = json.dumps(tasks.generate_tasks(self.rich), sort_keys=True, ensure_ascii=False)
@@ -80,7 +99,7 @@ class TaskCardTests(unittest.TestCase):
         self.assertTrue(all(c["blinded"] for c in cards))
 
     def test_unblinded_mode_available(self):
-        cards = tasks.generate_tasks(self.rich, blinded=False)
+        cards = tasks.generate_tasks(self.rich, blinding_level="none")
         self.assertTrue(all(not c["blinded"] for c in cards))
 
     def test_stage2_cards_on_demand(self):

@@ -33,8 +33,8 @@ class BeatGridTests(unittest.TestCase):
                                           jitter_ms=0, wander_ms=0)
         cls.jittered = fx.render_kick_track(cls.fx.dir / "jittered.wav", bpm=128,
                                             jitter_ms=3.0, wander_ms=2.0)
-        sr_l, m_lock = decode.decode_work(str(cls.locked), sample_rate=44100)
-        sr_j, m_jit = decode.decode_work(str(cls.jittered), sample_rate=44100)
+        sr_l, _st, m_lock = decode.decode_work(str(cls.locked), sample_rate=44100)
+        sr_j, _st, m_jit = decode.decode_work(str(cls.jittered), sample_rate=44100)
         cls.res_lock = beatgrid.analyze(m_lock, sr_l, CFG["beatgrid"])
         cls.res_jit = beatgrid.analyze(m_jit, sr_j, CFG["beatgrid"])
 
@@ -59,7 +59,7 @@ class BeatGridTests(unittest.TestCase):
     def test_locked_grades_timing_locked(self):
         g = verdict._grade_beatgrid(self.res_lock, CFG)
         self.assertEqual(g["verdict"], "timing_locked")
-        self.assertIn("quantized DAW", g["interpretation_en"])
+        self.assertIn("production-consistency", g["interpretation_en"])
 
     def test_jittered_grid_shows_generative_wander(self):
         r = self.res_jit
@@ -87,8 +87,8 @@ class TwoStepPatternTests(unittest.TestCase):
         cls.jittered = fx.render_kick_track(cls.fx.dir / "ts_jit.wav", bpm=136,
                                             jitter_ms=3.0, wander_ms=2.0, dur=90,
                                             pattern="twostep")
-        sr, m1 = decode.decode_work(str(cls.locked), sample_rate=44100)
-        _, m2 = decode.decode_work(str(cls.jittered), sample_rate=44100)
+        sr, _st, m1 = decode.decode_work(str(cls.locked), sample_rate=44100)
+        _, _st, m2 = decode.decode_work(str(cls.jittered), sample_rate=44100)
         cls.res_lock = beatgrid.analyze(m1, sr, CFG["beatgrid"])
         cls.res_jit = beatgrid.analyze(m2, sr, CFG["beatgrid"])
 
@@ -123,8 +123,8 @@ class SpectralTests(unittest.TestCase):
         cls.fx = fx.FixtureDir()
         cls.full = fx.render_band_noise(cls.fx.dir / "full.wav", cutoff_hz=None)
         cls.walled = fx.render_band_noise(cls.fx.dir / "walled.wav", cutoff_hz=20500)
-        sr_f, m_full = decode.decode_work(str(cls.full), sample_rate=44100)
-        sr_w, m_walled = decode.decode_work(str(cls.walled), sample_rate=44100)
+        sr_f, _st, m_full = decode.decode_work(str(cls.full), sample_rate=44100)
+        sr_w, _st, m_walled = decode.decode_work(str(cls.walled), sample_rate=44100)
         cls.res_full = spectral.analyze(m_full, sr_f, CFG["spectral"])
         cls.res_walled = spectral.analyze(m_walled, sr_w, CFG["spectral"])
 
@@ -167,25 +167,33 @@ class VerdictAggregationTests(unittest.TestCase):
         return {"brick_wall": wall, "cutoff_hz": cutoff,
                 "cliff_depth_db": 37.0 if wall else None}
 
-    def _meta(self, flags):
-        return {"flags": flags, "platform_fingerprint": [], "vendor": "x",
-                "container": "flac"}
+    def _meta(self, flags, families=None):
+        return {"flags": flags, "flag_families": families or {}, "platform_fingerprint": [],
+                "vendor": "x", "container": "flac"}
 
-    def test_strong_ai_timing_plus_delivery(self):
-        out = verdict.aggregate(self._meta(["picture_mime_mismatch", "decoder_errors"]),
+    def test_convergent_ai_with_alternatives(self):
+        fams = {"integrity": ["decoder_errors"], "packaging": [], "provenance": []}
+        out = verdict.aggregate(self._meta(["decoder_errors"], fams),
                                 self._sp(True, 20462), self._bg(2.3, 7.0), "flac", CFG)
-        self.assertEqual(out["verdict"], "STRONG_AI_EVIDENCE")
+        self.assertEqual(out["verdict"], "AI_EVIDENCE_CONVERGENT")
         self.assertTrue(out["delivery_chain_fused"])
+        self.assertTrue(out["alternative_hypotheses"])
+        self.assertTrue(out["human_gate_recommended"])
+        self.assertTrue(out["disclaimer"].startswith(f"Thresholds {CFG['meta']['version']}"))
 
     def test_likely_ai_timing_only(self):
         out = verdict.aggregate(self._meta([]), self._sp(False, None),
                                 self._bg(2.0, 10.0), "flac", CFG)
         self.assertEqual(out["verdict"], "LIKELY_AI")
+        self.assertFalse(out["human_gate_recommended"])
+        self.assertTrue(out["alternative_hypotheses"])
 
     def test_likely_human_requires_positive_everywhere(self):
         out = verdict.aggregate(self._meta([]), self._sp(False, None),
                                 self._bg(0.3, 95.0), "flac", CFG)
         self.assertEqual(out["verdict"], "LIKELY_HUMAN")
+        # production-consistency, not authorship: alternative must be listed
+        self.assertIn("AI-hybrid", out["alternative_hypotheses"][0])
 
     def test_no_cutoff_alone_is_not_human(self):
         # full-band spectrum + no timing evidence => nothing to say
@@ -198,9 +206,20 @@ class VerdictAggregationTests(unittest.TestCase):
                                 self._bg(0.0, 0.0, applicable=False), "flac", CFG)
         self.assertEqual(out["verdict"], "DELIVERY_CHAIN_ANOMALY")
 
-    def test_metadata_anomaly_fuses_into_delivery_vote(self):
-        out = verdict.aggregate(self._meta(["md5_mismatch"]), self._sp(False, None),
-                                self._bg(0.0, 0.0, applicable=False), "flac", CFG)
+    def test_packaging_flag_never_votes(self):
+        # picture MIME mismatch is packaging — must NOT produce a delivery verdict
+        out = verdict.aggregate(
+            self._meta(["picture_mime_mismatch"],
+                       {"integrity": [], "packaging": ["picture_mime_mismatch"],
+                        "provenance": []}),
+            self._sp(False, None), self._bg(0.0, 0.0, applicable=False), "flac", CFG)
+        self.assertEqual(out["verdict"], "INCONCLUSIVE")
+
+    def test_integrity_flag_votes_into_delivery(self):
+        out = verdict.aggregate(
+            self._meta(["md5_mismatch"],
+                       {"integrity": ["md5_mismatch"], "packaging": [], "provenance": []}),
+            self._sp(False, None), self._bg(0.0, 0.0, applicable=False), "flac", CFG)
         self.assertEqual(out["verdict"], "DELIVERY_CHAIN_ANOMALY")
 
 

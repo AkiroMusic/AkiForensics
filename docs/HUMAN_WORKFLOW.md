@@ -33,7 +33,12 @@ report.json.manual_tasks → AI 渲染操作单 → 真人执行 → 回传（�
 5. Record RX version.
 
 **Record**: `cutoff_hz_left`, `cutoff_hz_right`, `wall_stable_across_subsegments`, `lr_consistent`, `above_wall_silence`, `rx_version`, screenshots.
-**Accept**: wall stable ±200 Hz across sub-segments, L/R consistent → confirms lossy-source fingerprint. **Refute**: no wall, or sub-segment drift >500 Hz. **Undetermined**: unmeasurable edge.
+**Accept**: stable HF boundary ±200 Hz across sub-segments, L/R consistent → confirms a stable high-frequency boundary EXISTS (consistent with a lossy transcode; master LPF / hardware band-limit remain possible — follow with RX-003). **Refute**: no boundary, or sub-segment drift >500 Hz. **Undetermined**: unmeasurable edge.
+
+## RX-003 · Multi-resolution spectral verification 多分辨率频谱验证
+
+**Tool**: RX 12 — Spectrogram · **Segment**: same as RX-001.
+Repeat the RX-001 measurement at **FFT 2048 / 4096 / 8192** (Hann, same time range, same frequency axis, note overlap and amplitude scale for each). Purpose: a codec cutoff is resolution-stable; a musical/EQ rolloff shifts with time resolution. Record the boundary per resolution + screenshots. **Accept**: boundary position stable across all three resolutions. **Refute**: boundary moves >500 Hz between resolutions → musical/EQ origin.
 
 ## RX-002 · Kick waveform inspection 底鼓波形检查
 
@@ -58,7 +63,7 @@ Each: `present yes/no/unsure` + `timestamp_s` + note. Record listening environme
 ## UVR-001 · Stem separation (stage-2, on demand) 分离取证
 
 **Tool**: Ultimate Vocal Remover 5 · **Segment**: engine-computed 45 s excerpt only.
-**Fixed model/settings**: use ONE model consistently, recorded by name and version in the return (v1 does not pin a specific model; the card names whatever was standardized at generation time — deviation must be recorded). 只对片段做 2-stem（Vocals/Instrumental）；导出保持原始采样率、零后处理；回传 stem 文件 + 模型名/设置截图。**后续频谱/时序分析由引擎自动重跑** — the human's job ends at operating the tool.
+**Fixed model/settings**: the card carries `model.name` / `model.version` / `model.checksum` (standardized at generation time); ANY deviation must be recorded in `deviations`. Stems are DERIVED evidence — subordinate to the original audio, never an independent source. 只对片段做 2-stem；导出保持原始采样率、零后处理；回传 stem 文件 + 模型名/版本/校验和与设置截图。**后续频谱/时序分析由引擎自动重跑** — the human's job ends at operating the tool.
 ⚠️ Separation artifacts ≠ generation artifacts. Stem anomalies are first compared against the model's baseline behavior; residuals are separation error, not "AI evidence". 分离伪迹 ≠ 生成痕迹。
 
 ## PA-001 · Realtime mastering profile 实时画像（描述性）

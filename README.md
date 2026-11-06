@@ -4,25 +4,25 @@
 
 **AI 生成音乐取证工具** —— 三条自动化证据链（节拍网格时序 / 有损截止指纹 / 元数据链）、分级判定、双语 HTML 报告，外加人工在环任务卡协议（iZotope RX 12 / UVR5 / Pure Analyzer）：AI 发卡 → 真人执行 → 回传数值与截图 → AI 双轨合并。
 
-> **Honesty note** · Thresholds `v0-n1` are calibrated on a single confirmed case. Verdicts are evidence-weighted, not ground truth. Run `calibrate` against a human/AI reference corpus before relying on binary calls.
+> **Honesty note** · Thresholds (version in `config/thresholds.toml`) are calibrated on one confirmed case + a small real-AI reference set; the human side is physics-based. Verdicts are evidence-weighted, not ground truth. Run `calibrate` against a human/AI reference corpus before relying on binary calls.
 >
-> **诚实声明** · 阈值 `v0-n1` 基于单一确认案例校准。判定为证据加权结论，非 ground truth。在用 `calibrate` 跑过参考语料之前，不要把二值结论当真值用。
+> **诚实声明** · 阈值（版本见 `config/thresholds.toml`）基于单一确认案例 + 小规模真实 AI 参考集；人类侧为物理先验。判定为证据加权结论，非 ground truth。在用 `calibrate` 跑过参考语料之前，不要把二值结论当真值用。
 
 ## How it works · 工作原理
 
-Three independent evidence legs, graded and converged:
+Three analytical modules, grouped into evidence families (timing is audio-intrinsic; spectral + metadata form the correlated delivery-chain family and are fused as one vote), graded and converged:
 
-三条独立证据链，逐条分级后收敛：
+三个分析模块按证据族分组（时序为音频内在证据；频谱 + 元数据构成相关交付链族并合票），逐条分级后收敛：
 
 | Leg | What it measures | Discriminative power |
 |---|---|---|
-| **A · Beat-grid timing** 时序 | Kick onsets vs best-fit constant-BPM grid; sub-ms residuals via cross-correlation. Quantized DAW render ⇒ residual std < 0.2–0.6 ms, ~100% within ±0.3 ms, round BPM. Generative models wander 2–40 ms with non-integer tempo. | **Decisive** (audio-intrinsic) |
-| **B · Spectral fingerprint** 频谱 | Brick-wall cutoff + codec noise bed inside a nominally lossless container ⇒ lossy-source (fake lossless) fingerprint, e.g. LAME MP3 320's 20.5 kHz wall. | Delivery-chain evidence |
+| **A · Beat-grid timing** 时序 | Kick onsets vs best-fit constant-BPM grid; sub-ms residuals via cross-correlation. Quantized DAW render ⇒ residual std < 0.2–0.6 ms, ~100% within ±0.3 ms, round BPM. Observed on real Suno corpus (n=7): std 1.3–3.4 ms, non-integer tempo — an empirical range, not a universal law. | **Decisive** (audio-intrinsic) |
+| **B · Spectral fingerprint** 频谱 | Brick-wall cutoff + HF band variability inside a nominally lossless container ⇒ lossy-source fingerprint (e.g. LAME 320's 20.5 kHz wall; observed Suno originals cluster at ~20.1 kHz, n=7). | Delivery-chain evidence |
 | **C · Metadata chain** 元数据 | FLAC block inventory, STREAMINFO MD5 integrity, cover MIME mismatches, platform farm tags (KuGou etc.), decoder errors. | Circumstantial |
 
-Verdicts: `STRONG_AI_EVIDENCE` / `LIKELY_AI` / `LIKELY_HUMAN` / `DELIVERY_CHAIN_ANOMALY` / `INCONCLUSIVE`. Design rules (docs/evidence-model.md): legs report measurements, not attributions; delivery-chain findings fuse as ONE correlated vote; absence of anomalies is never positive evidence. The timing leg is genre-gated: tracks without a steady kick grid report `N/A` for leg A instead of a guess.
+Verdicts: `AI_EVIDENCE_CONVERGENT` / `LIKELY_AI` / `LIKELY_HUMAN` / `DELIVERY_CHAIN_ANOMALY` / `INCONCLUSIVE` — every source-leaning verdict carries mandatory `alternative_hypotheses` disclosure. Design rules (docs/evidence-model.md): legs report measurements, not attributions; delivery-chain findings fuse as ONE correlated vote; absence of anomalies is never positive evidence. The timing leg is genre-gated: tracks without a steady kick grid report `N/A` for leg A instead of a guess.
 
-判定等级：`STRONG_AI_EVIDENCE`（强 AI 特征）/ `LIKELY_AI`（倾向 AI）/ `LIKELY_HUMAN`（倾向人类）/ `DELIVERY_CHAIN_ANOMALY`（仅交付链异常，归因保留）/ `INCONCLUSIVE`（证据不足）。设计原则（docs/evidence-model.md）：证据链只报测量不作归因；交付链发现按相关性合票；无异常永远不是正向证据。时序链按曲风门控：无稳定底鼓网格的曲子 A 链报 `N/A`，不硬判。
+判定等级：`AI_EVIDENCE_CONVERGENT`（AI 证据收敛）/ `LIKELY_AI`（倾向 AI）/ `LIKELY_HUMAN`（倾向人类）/ `DELIVERY_CHAIN_ANOMALY`（仅交付链异常，归因保留）/ `INCONCLUSIVE`（证据不足）。设计原则（docs/evidence-model.md）：证据链只报测量不作归因；交付链发现按相关性合票；无异常永远不是正向证据。时序链按曲风门控：无稳定底鼓网格的曲子 A 链报 `N/A`，不硬判。
 
 ## Human-in-the-loop · 人工在环
 
@@ -61,21 +61,21 @@ python -m akiforensics analyze track.flac --config config/thresholds.toml
 python run_tests.py -v
 ```
 
-Synthetic fixtures prove each leg measures what it claims: a sample-locked 128 BPM kick grid grades `human_consistent` (std ≈ 0.1 ms); the same grid with ±3 ms jitter + slow wander grades `ai_consistent`; a 20.5 kHz brick wall inside FLAC grades `ai_consistent` (and `N/A` inside MP3). A corpus-driven integration test activates when you point it at a confirmed sample:
+Synthetic fixtures prove each leg measures what it claims: a sample-locked 128 BPM kick grid grades `timing_locked` (std ≈ 0.1 ms); the same grid with ±3 ms jitter + slow wander grades `timing_variation`; a 20.5 kHz brick wall inside FLAC grades `lossy_source_fingerprint` (and `N/A` inside MP3). A corpus-driven integration test activates when you point it at a confirmed sample:
 
 ```bash
 AKIFORENSICS_CASE_FILE="D:\refs\confirmed_ai\track.flac" python run_tests.py -v   # must not grade human-side
 AKIFORENSICS_CASE_FILE="D:\refs\confirmed_human\track.flac" AKIFORENSICS_EXPECT=human python run_tests.py -v
 ```
 
-合成 fixtures 验证每条链测的就是它声称的：采样级锁定 128 BPM 底鼓网格判 `human_consistent`（std ≈ 0.1 ms）；同网格加 ±3 ms 抖动+慢游移判 `ai_consistent`；FLAC 内 20.5 kHz 砖墙判 `ai_consistent`（MP3 内则正确报 `N/A`）。语料驱动的集成测试：把 `AKIFORENSICS_CASE_FILE` 指向任一已确认样本（文件名任意）即自动启用，断言引擎不作出反向判定（`AKIFORENSICS_EXPECT=human` 用于已确认人类样本）。
+合成 fixtures 验证每条链测的就是它声称的：采样级锁定 128 BPM 底鼓网格判 `timing_locked`（std ≈ 0.1 ms）；同网格加 ±3 ms 抖动+慢游移判 `timing_variation`；FLAC 内 20.5 kHz 砖墙判 `lossy_source_fingerprint`（MP3 内则正确报 `N/A`）。语料驱动的集成测试：把 `AKIFORENSICS_CASE_FILE` 指向任一已确认样本（文件名任意）即自动启用，断言引擎不作出反向判定（`AKIFORENSICS_EXPECT=human` 用于已确认人类样本）。
 
 ## Calibration status · 校准状态
 
-- `v0-n1` (current): thresholds from one confirmed AI case (private reference sample, 2026-11-05) + DAW physics first principles. Human-side bounds are generous to avoid false accusations.
+- Current version (see `config/thresholds.toml [meta].version` for the single source of truth): thresholds from one confirmed AI case (private reference sample, 2026-11-05) + a 7-track real Suno WAV reference set (7/7 brick wall at ~20.1 kHz; timing std 1.3–3.4 ms where measurable) + DAW physics for the human side. Human-side bounds are generous to avoid false accusations.
 - Next: render a human reference set from your own DAW (quantized / unquantized, several tempi) and collect known AI output, then `calibrate` → bump threshold version.
 
-- `v0-n1`（当前）：阈值来自单一已确认 AI 案例（私有参考样本，2026-11-05）+ DAW 物理第一性原理。人类侧阈值刻意放宽以避免冤枉真人作品。
+- 当前版本（以 `config/thresholds.toml [meta].version` 为唯一事实源）：阈值来自单一确认 AI 案例（私有参考样本，2026-11-05）+ 7 首真实 Suno WAV 参考集（7/7 检出 ~20.1 kHz 砖墙；可测时序 std 1.3–3.4 ms）+ 人类侧物理先验。人类侧阈值刻意放宽以避免冤枉真人作品。
 - 下一步：用你自己的 DAW 渲染人类参考集（量化/不量化、多个速度），收集已知 AI 曲，跑 `calibrate` → 升级阈值版本号。
 
 ## Known limits · 已知局限

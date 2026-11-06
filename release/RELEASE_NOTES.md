@@ -1,41 +1,68 @@
-# AkiForensics v0.2.0 — 2026-11-07
+# AkiForensics v0.3.0 — 2026-11-07
 
-Evidence-model v2 + Human-in-the-Loop task cards (protocol 1.0). Threshold provenance unchanged: `v0-n1` (single confirmed case).
+Adversarial review round 2 response: 3 confirmed P0 bugs fixed, verdict semantics
+hardened (evidence-model v3), human-submission loop closed. Threshold provenance
+`v0-n1.1` unchanged (single source of truth: config/thresholds.toml).
 
-## Main-kick cluster selection (broken patterns)
+## P0 fixes (all reproduced before fixing)
 
-- Grid fitting now runs on the **strongest coherent kick cluster** (phase-clustered, strength-weighted — typically the downbeat kick) instead of all kick candidates: two-step / ghost-kick patterns are judged without mixing structural positions, which would fake timing variation in DAW renders.
-- `kick_selection` field reports mode (`main-cluster` / `all`) and candidate/selected counts; relaxed beat floor (`min_kicks_cluster = 24`) since main kicks occur once per bar.
-- Reported BPM folds grid sub-harmonics into the musical range [90, 180) (`bpm` + `bpm_grid_raw`); integer-BPM distance uses the folded value. Residual statistics are unaffected by the fold.
+- **metadata.py**: `_picture_info` double-`errors` decode TypeError (crash on any
+  FLAC with a PICTURE block — never triggered by old fixtures, found by review);
+  full bounds checks in `_picture_info` + `_parse_vorbis_comment`; PICTURE layout
+  corrected to the FLAC spec (w/h/depth/colors + dataLen skip). Regression-tested
+  with direct byte injection incl. hostile/truncated/absurd-length inputs.
+- **tests**: corpus integration test asserted v1 labels (`ai_consistent`) —
+  vacuously passing since v2. Rewritten for v3 with explicit `na` handling and
+  mandatory alternative-disclosure assertion.
+- **version drift**: disclaimer hard-coded `v0-n1` vs config `v0-n1.1`. The
+  disclaimer is now generated from `cfg["meta"]["version"]`; docs reference the
+  config as the single source of truth.
 
-## Evidence model v2 (breaking vocabulary change)
+## Evidence-model v3 semantics
 
-- Legs now report measurements, not attributions: `timing_locked` / `timing_variation` / `no_anomaly_detected` / `lossy_source_fingerprint` / `anomalies_present` / `clean` / `na`.
-- **`no_anomaly_detected` no longer grades as human-consistent** — full-band spectrum is consistent with both true masters and high-quality AI output.
-- Delivery-chain findings (spectral fingerprint + metadata anomalies) fuse as ONE correlated vote; never summed as independent evidence.
-- New verdict `DELIVERY_CHAIN_ANOMALY`: delivery evidence without timing evidence → attribution withheld.
-- `LIKELY_HUMAN` requires positive evidence everywhere (sample-locked grid + no anomaly + clean metadata).
-- `LIKELY_AI` = timing variability as audio-intrinsic evidence, with explicit "consistent with unquantized live playing" caveat in the leg interpretation.
+- `STRONG_AI_EVIDENCE` → `AI_EVIDENCE_CONVERGENT`; EVERY source-leaning verdict
+  carries mandatory `alternative_hypotheses` (e.g. "unquantized live performance +
+  lossy transcode of a human master"; `LIKELY_HUMAN` discloses "loop/sampler-based
+  AI-hybrid production"). Convergent verdicts auto-issue the DAW-001 listening
+  gate (alternative-hypothesis check).
+- Metadata flags classified into families: integrity / packaging / provenance.
+  Only spectral fingerprint + INTEGRITY flags feed the delivery-chain vote;
+  packaging (cover MIME mismatch) and provenance (platform tags) are context only.
+- `noise_bed_std_db` → `hf_band_level_variability_db` (it measures HF band level
+  variation through time, not a codec noise floor).
+- Spectral leg: Nyquist guard (low sample rates → `na` with reason, never
+  "no anomaly").
+- RX-001 acceptance de-attributed: confirms "a stable HF boundary exists"
+  (transcode-compatible, not exclusive); RX-003 multi-resolution verification
+  (2048/4096/8192) added to the protocol.
 
-## Engine hardening
+## Engineering
 
-- `decode_work` keeps the NATIVE sample rate (no more unconditional 44.1 kHz resample manufacturing artifacts).
-- metadata.py: streamed FLAC block parser with bounds checks (oversized/truncated block flags) replacing the fixed 4 MB read.
-- report.py: HTML escaping on all file-controlled strings; new timing metrics in reports.
-- beatgrid: new metrics — `local_bpm_drift`, `onset_confidence` (mean xcorr quality), `grid_hit_rate`, `beat_times`.
-
-## Human-in-the-loop task cards (protocol 1.0)
-
-- `tasks.py` generates verdict-moving task cards from analysis results: RX-001 cutoff verification, RX-002 kick waveform inspection, DAW-001 structured listening checklist; stage-2 UVR-001 stem separation and PA-001 Pure Analyzer profile on demand (`force=`).
-- Deterministic segments (computed from detected features), fixed tool settings, falsifiable acceptance criteria (confirm/refute/undetermined).
-- **Blinded by default**: cards never contain engine measurement values; comparison is dual-track after return (human records never overwrite engine records).
-- Cards land in `report.json.manual_tasks`, the HTML report, the console summary, and batch CSV.
-- Protocols: `docs/evidence-model.md`, `docs/HUMAN_WORKFLOW.md`; session loop protocol in `skill/SKILL.md`.
+- `decode_work`: float32 working copies at NATIVE rate (24-bit sources no longer
+  quantized to 16-bit), stereo preserved alongside the mono downmix for future
+  stereo/mid-side forensics; `decode_pcm` annotation fixed.
+- calibrate.py: spectral features (cutoff/cliff/hf_variability/wall-rate) now
+  included in per-class stats; output framed as THRESHOLD PROPOSAL (never
+  auto-applied).
+- Human-submission loop closed: `submission.py` (validate against task card →
+  dual-track comparison with per-task tolerances → attach evidence object; engine
+  values never overwritten) + CLI `akiforensics merge-submission`.
+- Blinding levels: `value` (default) / `hypothesis` (operator_view strips
+  hypothesis, gap, and acceptance wording) / `none`; `analyze --blinding` flag.
+- `analyze --task UVR-001 --task PA-001` for stage-2 cards.
+- README/docs wording: evidence families (not "independent legs"), empirical
+  ranges labeled with n, v3 vocabulary in test descriptions.
 
 ## Tests
 
-29 tests: synthetic fixtures, new-vocabulary assertions, verdict table incl. "delivery-chain alone never attributes", task-card determinism/completeness/blinding/gap-targeting/stage-2, corpus-driven integration (`AKIFORENSICS_CASE_FILE`).
+46 tests (was 32): hostile-metadata byte injection, submission
+validate/merge/agreement/contradiction/no-overwrite, blinding levels +
+operator_view projection, packaging-flag-never-votes, dynamic-disclaimer,
+two-step main-cluster regression, corpus integration (v3 labels).
 
-## Known limits
+## Declined (with reasons, see docs/reviews response)
 
-Unchanged (README §Known limits). Binary verdicts are not ground truth until corpus-calibrated.
+- Full evidence-graph / task-store infrastructure (single-session loop;
+  submission.py covers the six-stage return path minus state management).
+- Stripping attribution entirely from verdicts (replaced by mandatory
+  alternative-hypotheses disclosure — shrinking the explanation space IS the job).

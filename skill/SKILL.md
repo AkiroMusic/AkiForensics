@@ -24,14 +24,16 @@ Tool location: `E:\Code\Akiro Project\AkiForensics\` (engine in `src/akiforensic
 
 3. **Human-in-the-loop round (protocol 1.0)** — `report.json.manual_tasks` holds generated task cards (RX-001 cutoff verification, RX-002 kick inspection, DAW-001 listening checklist; stage-2 UVR-001/PA-001 on demand). For each card:
    - Render the card's `steps_zh` as the operating sheet for the user (Chinese steps, tool terms in English).
-   - **Blinding**: cards default `blinded: true` — NEVER reveal engine expectations (cutoff Hz, residual ms) until the user's number sheet is complete. If asked, explain blinding first.
-   - Receive results: parse the number sheet FIRST (screenshots are consistency witnesses only; settings must be visible in them). `null` is a valid measurement.
-   - Compare dual-track vs engine values per the card's acceptance criteria; record BOTH values; agreement raises confidence, contradiction spawns a targeted follow-up (different segment / second tool) — never silently overwrite either side.
+   - **Blinding levels**: `value` (default; hypothesis shown, engine numbers hidden), `hypothesis` (operator_view strips hypothesis/gap — use for research-grade runs via `--blinding hypothesis`), `none` (control runs). Cards default to value-blinded — NEVER reveal engine expectations (cutoff Hz, residual ms) until the user's number sheet is complete. If asked, explain blinding first.
+   - Receive results: write the number sheet as a submission JSON and run
+     `PYTHONPATH=src python -m akiforensics merge-submission <report.json> <submission.json>`
+     — it validates, compares dual-track, and attaches the evidence object. Screenshots are consistency witnesses only (settings visible); `null` is a valid measurement.
+   - Agreement raises confidence; contradiction spawns a targeted follow-up (different segment / second tool) — never silently overwrite either side. Apply the card's acceptance criteria to reinterpret the verdict in-session.
    - Stage-2: DAW-001 with ≥2 vocal flags → issue UVR-001 (`force=("UVR-001",)` via regenerate or read template from docs/HUMAN_WORKFLOW.md).
 
 4. **Distribution leg (session-only)** — WebSearch artist + exact title: Spotify/Audiomack pages, ℗ label line, catalog pattern (many "(hot song)(电音版)" remixes = content-farm signature). Circumstantial; record as narrative.
 
-5. **Report** — convergent grading only; state threshold provenance (v0-n1, single confirmed case) in every verdict; final call always includes a listening pass recommendation.
+5. **Report** — convergent grading only; state threshold provenance (version comes from config/thresholds.toml — never hardcode it) in every verdict; final call always includes a listening pass recommendation.
 
 ## Rules
 

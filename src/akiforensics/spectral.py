@@ -8,6 +8,19 @@ from scipy import signal as sps
 
 
 def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
+    # Nyquist guard: the 14–20 kHz reference band must exist, else the leg
+    # measures nothing and must say so instead of reporting "no anomaly".
+    if sr / 2 < cfg["band_max_hi_hz"] + 500:
+        return {"cutoff_hz": None, "band_max_db_14_20k": None,
+                "above_cutoff_mean_db": None, "above_cutoff_digital_silence": False,
+                "cliff_depth_db": None, "brick_wall": False,
+                "fake_lossless_suspect": False,
+                "hf_band_level_variability_db": None,
+                "energy_fractions_pct": {},
+                "not_applicable": True,
+                "na_reason": (f"sample rate {sr} too low for the HF reference band "
+                              f"(Nyquist {sr/2:.0f} Hz)"),
+                "_plotdata": {}}
     nper = 8192
     f, t, Sxx = sps.spectrogram(mono, sr, nperseg=nper, noverlap=nper // 2,
                                 window="hann")
@@ -51,7 +64,9 @@ def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
         "pct_above_20.5k": frac(20500, sr / 2),
     }
 
-    # codec noise bed: steadiness of a high band through time
+    # HF band level variability: steadiness of the 16–19.5 kHz mean level
+    # through time. NOTE: musical content in that band (cymbals etc.) also
+    # moves it — this is NOT a codec noise floor measurement.
     nb = (f >= cfg["noise_bed_lo_hz"]) & (f <= cfg["noise_bed_hi_hz"])
     bed_db = 10 * np.log10(Sxx[nb].mean(axis=0) + 1e-14)
     bed_std = float(bed_db.std())
@@ -71,7 +86,7 @@ def analyze(mono: np.ndarray, sr: int, cfg: dict) -> dict:
         "cliff_depth_db": None if cutoff_hz is None else round(band_max_db - (above_db or -200.0), 1),
         "brick_wall": wall,
         "fake_lossless_suspect": wall and lossy_container_note is not None,
-        "noise_bed_std_db": round(bed_std, 2),
+        "hf_band_level_variability_db": round(bed_std, 2),
         "energy_fractions_pct": {k: round(v, 4) for k, v in energy.items()},
         "_plotdata": {
             "freqs": f, "avg_db": avg_db,

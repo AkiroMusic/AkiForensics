@@ -25,24 +25,24 @@ Cutoff wall, codec noise bed, and metadata anomalies typically originate from a 
 
 ## 3 · Verdict table 判定表
 
-| Verdict | Requires 要求 |
-|---|---|
-| `STRONG_AI_EVIDENCE` | `timing_variation` **and** delivery-chain anomaly 收敛 |
-| `LIKELY_AI` | `timing_variation` alone（音频内在证据，无交付链佐证） |
-| `LIKELY_HUMAN` | `timing_locked` **and** no delivery anomaly（正向一致性，非证明） |
-| `DELIVERY_CHAIN_ANOMALY` | Delivery anomaly without timing evidence — attribution withheld 归因保留 |
-| `INCONCLUSIVE` | No positive evidence 无正向证据 |
+| Verdict | Requires 要求 | Standing alternatives 必列替代假设 |
+|---|---|---|
+| `AI_EVIDENCE_CONVERGENT` | `timing_variation` **and** delivery-chain anomaly 收敛；auto-issues the listening gate 自动签发听检门 | unquantized live performance + lossy transcode of a human master |
+| `LIKELY_AI` | `timing_variation` alone（音频内在证据，无交付链佐证） | same as above |
+| `LIKELY_HUMAN` | `timing_locked` **and** no delivery anomaly — production-consistency, NOT authorship 制作一致性而非作者身份 | loop/sampler-based AI-hybrid production |
+| `DELIVERY_CHAIN_ANOMALY` | Delivery anomaly without timing evidence — attribution withheld 归因保留 | n/a (no attribution made) |
+| `INCONCLUSIVE` | No positive evidence 无正向证据 | n/a |
 
-Absence of anomalies is never positive evidence. 无异常永远不是正向证据。
+Source-leaning verdicts MUST carry `alternative_hypotheses`（来源倾向判定必须披露剩余解释）. Absence of anomalies is never positive evidence. 无异常永远不是正向证据。
 
 ## 4 · Human evidence (Task Cards) 人工证据
 
-Human measurements enter as separate evidence objects — **dual-track**: engine values and human values are both recorded; neither overwrites the other. Agreement raises confidence; contradiction is itself new evidence and spawns the next task round.
+Human measurements enter as separate evidence objects — **dual-track**: engine values and human values are both recorded; neither overwrites the other. Agreement raises confidence; contradiction is itself new evidence and spawns the next task round. Return path: `submission.py` + `akiforensics merge-submission` (validate → compare → attach; verdict reinterpretation per card acceptance criteria in-session).
 
-人工测量以独立证据对象入库——**双轨制**：引擎值与人工值同时记录，互不覆盖。一致提升置信；矛盾本身就是新证据，触发下一轮任务。
+人工测量以独立证据对象入库——**双轨制**：引擎值与人工值同时记录，互不覆盖。一致提升置信；矛盾本身就是新证据，触发下一轮任务。回传闭环：`submission.py` + CLI `merge-submission`。
 
-Task cards follow protocol 1.0 (`src/akiforensics/tasks.py`): deterministic segments, blinding by default, falsifiable acceptance criteria. Full protocol: `docs/HUMAN_WORKFLOW.md`.
+Blinding levels 盲化分级: `value`（默认——卡含假设不含引擎值）/ `hypothesis`（operator_view 剥离假设，测量者不知系统怀疑什么）/ `none`（对照模式）。Research-grade runs should prefer `hypothesis`. Task cards follow protocol 1.0 (`src/akiforensics/tasks.py`); full protocol: `docs/HUMAN_WORKFLOW.md`.
 
 ## 5 · Threshold provenance 阈值溯源
 
-Every verdict carries `threshold_version` + disclaimer. `v0-n1` = one confirmed case + DAW physics; do not treat binary calls as ground truth until `calibrate` runs on a corpus.
+Every verdict carries `threshold_version` (read from `config/thresholds.toml [meta].version` — the single source of truth) + a dynamic disclaimer. Current calibration state is documented in the config header. 判定携带从配置动态读取的阈值版本；校准状态以配置头注释为准。

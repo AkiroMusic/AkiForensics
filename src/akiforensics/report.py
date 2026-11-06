@@ -91,22 +91,22 @@ def _img64(path: str) -> str:
 
 
 _VERDICT_ZH = {
-    "STRONG_AI_EVIDENCE": "强 AI 特征（时序变异 + 交付链异常收敛）",
-    "LIKELY_AI": "倾向 AI 生成（音频内在时序证据）",
+    "AI_EVIDENCE_CONVERGENT": "AI 证据收敛（时序变异 + 交付链异常；替代假设已列明，听检门已排队）",
+    "LIKELY_AI": "倾向 AI 生成（音频内在时序证据；替代假设已列明）",
     "DELIVERY_CHAIN_ANOMALY": "仅交付链异常（无时序证据，不判来源）",
-    "LIKELY_HUMAN": "倾向人类制作（正向一致性证据，非证明）",
+    "LIKELY_HUMAN": "倾向人类制作（制作一致性证据，非作者身份证明）",
     "INCONCLUSIVE": "证据不足，无法判定",
 }
 _LEG_ZH = {
-    "timing_locked": "时序锁定（正向：符合量化渲染）",
+    "timing_locked": "时序锁定（量化渲染的制作一致性证据）",
     "timing_variation": "时序变异（需归因）",
     "timing_inconclusive": "时序不确定",
-    "lossy_source_fingerprint": "有损源指纹",
+    "lossy_source_fingerprint": "有损源指纹（交付链线索）",
     "no_anomaly_detected": "无异常（非来源诊断）",
-    "anomalies_present": "存在异常",
+    "integrity_anomalies": "完整性异常（integrity 族）",
     "clean": "干净", "na": "不适用", "inconclusive": "不确定",
 }
-_LEG_BAD = {"timing_variation", "lossy_source_fingerprint", "anomalies_present"}
+_LEG_BAD = {"timing_variation", "lossy_source_fingerprint", "integrity_anomalies"}
 _LEG_GOOD = {"timing_locked", "clean"}
 
 
@@ -133,9 +133,12 @@ def console_summary(result: dict) -> str:
         lines.append(f"  timing: N/A ({b.get('reason')})")
     s = result["spectral"]
     lines.append(f"  spectral: cutoff={s.get('cutoff_hz')} Hz  brick_wall={s.get('brick_wall')}"
-                 f"  noise_bed_std={s.get('noise_bed_std_db')} dB")
+                 f"  hf_variability={s.get('hf_band_level_variability_db')} dB")
     m = result["metadata"]
-    lines.append(f"  metadata: flags={m.get('flags') or 'none'}  vendor={m.get('vendor')}")
+    lines.append(f"  metadata: flags={m.get('flags') or 'none'}  integrity={m.get('flag_families', {}).get('integrity') or 'none'}")
+    v0 = result["verdict"]
+    for alt in v0.get("alternative_hypotheses", []):
+        lines.append(f"  ALT   ▶ {alt}")
     for t in result.get("manual_tasks", []):
         lines.append(f"  TASK ▶ {t['task_id']} [{t['tool']['name']}] "
                      f"{t['segment']['start_s']}–{t['segment']['end_s']}s "
@@ -206,10 +209,12 @@ def render_html(result: dict, outdir: str | Path) -> str:
     spec_rows = (
         f"<tr><td>Cutoff 截止频率</td><td>{s.get('cutoff_hz')} Hz</td></tr>"
         f"<tr><td>Brick wall 砖墙</td><td>{s.get('brick_wall')} (cliff 悬崖 {s.get('cliff_depth_db')} dB, above-cutoff mean 墙上均值 {s.get('above_cutoff_mean_db')} dB)</td></tr>"
-        f"<tr><td>Noise bed std 噪声底波动</td><td>{s.get('noise_bed_std_db')} dB</td></tr>"
+        f"<tr><td>HF band level variability 高频带能量波动 (非编码噪声底)</td><td>{s.get('hf_band_level_variability_db')} dB</td></tr>"
         f"<tr><td>Energy &gt;20.5 kHz 高频能量占比</td><td>{s['energy_fractions_pct'].get('pct_above_20.5k')}%</td></tr>")
 
     md_flags = ", ".join(_html.escape(str(x)) for x in (m.get("flags") or [])) or "none 无"
+    integrity = ", ".join(m.get("flag_families", {}).get("integrity") or []) or "none"
+    alts = "<br>".join("· " + _html.escape(a) for a in v.get("alternative_hypotheses", []))
     fp = m.get("platform_fingerprint") or []
     fp_rows = "".join(
         f"<tr><td>{_html.escape(p['platform'])}: {', '.join(_html.escape(str(x)) for x in p['fields'])}</td></tr>"
@@ -252,6 +257,7 @@ footer{{margin-top:2.5em;font-size:.82em;color:var(--muted);border-top:1px solid
 <div class="verdict"><div class="big">{verdict_en}</div>
 <div class="big zh">{verdict_zh}</div>
 <div class="meta" style="margin-top:.6em">Positive basis 正向依据: {basis}<br>
+Alternatives standing 替代假设: {alts if alts else "none（当前证据组合下无已建模替代解释）"}<br>
 legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '')} · spectral 频谱={_LEG_ZH.get(v['legs']['spectral']['verdict'], '')} · metadata 元数据={_LEG_ZH.get(v['legs']['metadata']['verdict'], '')}</div></div>
 <div class="warn">{v['disclaimer']}<br><span class="zh">阈值 v0-n1：基于单一确认案例校准。判定为证据加权结论，非 ground truth。无异常 ≠ 人类特征。</span></div>
 <h2>1 · Timing forensics 时序取证 <span style="color:#8a97a6;font-size:.85em">(measurement 时序测量，来源归因见解读行)</span></h2>
@@ -260,6 +266,7 @@ legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '
 <table><tr><th>Metric 指标</th><th>Value 值</th></tr>{spec_rows}</table>
 <h2>3 · Metadata forensics 元数据取证</h2>
 <table><tr><th>Flags 标记</th></tr><tr><td>{md_flags}</td></tr></table>
+<table><tr><th>Integrity family 参与交付链投票的 integrity 族</th></tr><tr><td>{integrity}</td></tr></table>
 <table><tr><th>Platform fingerprint 平台指纹</th></tr>{fp_rows}</table>
 <p>Vendor 编码器: <code>{_html.escape(str(m.get('vendor') or 'n/a'))}</code> · Container 容器: <code>{_html.escape(str(m.get('container')))}</code> · {m.get('sample_rate')} Hz / {m.get('channels')} ch</p>
 <h2>4 · Manual verification queue 待办人工验证</h2>
@@ -269,7 +276,7 @@ legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '
 <h2>6 · Method 方法</h2>
 <p>EN · Timing: 30–130 Hz kick isolation, RANSAC tempo/phase scan, linear grid fit, grid-position cross-correlated sub-ms refinement. Spectral: 8192-pt Hann spectrogram, brick-wall cliff detection vs 14–20 kHz reference band. Metadata: streamed FLAC block inventory + STREAMINFO MD5 verify + tag fingerprints. Delivery-chain findings are fused as one correlated vote, never summed.</p>
 <p class="zh">中文 · 时序：30–130 Hz 底鼓分离、RANSAC 速度/相位扫描、线性网格拟合、网格位置互相关亚毫秒精化。频谱：8192 点 Hann 频谱图、以 14–20 kHz 参考频带做砖墙悬崖检测。元数据：流式 FLAC 块清单 + STREAMINFO MD5 校验 + 平台 tag 指纹。交付链发现按相关性合票，不叠加计分。</p>
-<footer>AkiForensics v0.2.0 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
+<footer>AkiForensics v0.3.0 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
 </div></body></html>"""
     out = outdir / "report.html"
     out.write_text(html, encoding="utf-8")
