@@ -57,6 +57,27 @@ def _band_center_segment(analysis: dict, lo_hz: float, hi_hz: float,
     return start, min(start + width_s, duration)
 
 
+def _load_uvr_registry() -> dict:
+    """Load config/uvr_models.toml from the repo config dir (empty if absent)."""
+    import tomllib
+    p = Path(__file__).resolve().parents[2] / "config" / "uvr_models.toml"
+    if not p.exists():
+        return {}
+    with open(p, "rb") as f:
+        return tomllib.load(f)
+
+
+def _pick_uvr_model(registry: dict) -> tuple[dict, bool]:
+    """First registered model with a real (non-placeholder) sha256."""
+    for m in (registry.get("models") or {}).values():
+        sha = str(m.get("sha256", ""))
+        if len(sha) == 64 and not sha.lower().startswith("replace"):
+            return {"name": m.get("name", "?"), "version": m.get("version", "?"),
+                    "sha256": sha, "architecture": m.get("architecture", "?")}, True
+    return {"name": "unregistered", "version": "-", "sha256": "-",
+            "architecture": "-"}, False
+
+
 def _loudest_segment(analysis: dict, width_s: float, duration: float) -> tuple[float, float]:
     pd = analysis["spectral"].get("_plotdata") or {}
     f, spec_db, t = pd.get("freqs"), pd.get("spec_db"), pd.get("spec_t")
@@ -114,7 +135,7 @@ def _blind_steps(task_id: str, segment: tuple) -> list[str]:
         f"2. 选中 {segment[0]:.2f}s – {segment[1]:.2f}s（整段，不要改选）",
         "3. Spectrogram：FFT Size = 8192、Window = Hann，截图（含时间轴与频率轴刻度）",
         "4. Spectrum Analyzer：分别对 L / R 声道做整段平均，各截图一张（设置入镜）",
-        "5. 记录 5 kHz–22 kHz 范围内所有你观察到的明显频率边界或异常（频率 + 简述）；没有就写 none",
+        "5. 记录你观察到的所有明显频率边界或异常（全频段，频率 + 简述）；没有就写 none",
         "6. 记录工具版本号",
     ]
 
@@ -130,8 +151,11 @@ def _operator_view(card: dict) -> dict:
         record = {"boundaries_left": "数组：[{freq_hz, note}] 或 none",
                   "boundaries_right": "数组：[{freq_hz, note}] 或 none",
                   "tool_version": "字符串"}
+    segment = dict(card["segment"])
+    if "blind_steps_zh" in card:
+        segment["selection_rule"] = "按统一规则选取（选择依据不向执行人公开）"
     return {"task_id": card["task_id"], "protocol": card["protocol"],
-            "tool": card["tool"], "segment": card["segment"],
+            "tool": card["tool"], "segment": segment,
             "steps_zh": steps, "record_fields": record,
             "instruction_zh": ("请按步骤独立完成测量并如实记录；不要向 AI 询问任何预期值，"
                                "也不要根据既往分析推测目标结果。"),
@@ -140,7 +164,8 @@ def _operator_view(card: dict) -> dict:
 
 def generate_tasks(analysis: dict, blinded: bool = True,
                    blinding_level: str = "value",
-                   force: tuple[str, ...] = ()) -> list[dict]:
+                   force: tuple[str, ...] = (),
+                   round_id: int = 1) -> list[dict]:
     """Auto cards target evidence gaps; `force` adds on-demand stage-2 cards."""
     if blinding_level not in BLINDING_LEVELS:
         raise ValueError(f"blinding_level must be one of {BLINDING_LEVELS}")
@@ -275,39 +300,64 @@ def generate_tasks(analysis: dict, blinded: bool = True,
     # UVR-001 — stem separation (stage-2, on demand after vocal flags)
     if "UVR-001" in force:
         seg = _loudest_segment(analysis, 45.0, duration)
-        model = analysis.get("_uvr_model") or {
-            "name": "standardized-at-generation-time",
-            "version": "standardized-at-generation-time",
-            "sha256": "standardized-at-generation-time",
-        }
-        cards.append(_card(
-            "UVR-001",
-            {"name": "Ultimate Vocal Remover 5", "module": "2-Stage Separation",
-             "version": "由执行人记录"},
-            seg,
-            "分离人声/伴奏后，分别检查声部内异常（注意：分离伪迹 ≠ 生成痕迹）",
-            "Inspect separated stems for within-stem anomalies (separation artifacts ≠ generation artifacts)",
-            [
-                f"1. 使用任务指定的模型：{model['name']} v{model['version']} (sha256 {model['sha256'][:16]}…)，"
-                "任何偏离必须写进回传 deviations",
-                f"2. 只对 {seg[0]:.1f}s – {seg[1]:.1f}s 片段做 2-stem（Vocals/Instrumental）分离",
-                "3. 导出两个 stem 文件（保持原始采样率，不做任何后处理）",
-                "4. 回传 stem 文件 + 模型设置截图；后续频谱/时序分析由引擎自动完成",
-            ],
-            {"vocal_stem": "文件", "instrumental_stem": "文件",
-             "model_name": "字符串（必须与卡片一致）", "model_version": "字符串",
-             "model_sha256": "模型文件 SHA-256（与卡片一致，偏离记录 deviations）",
-             "settings_screenshot": "settings.png"},
-            {"interpretation": "引擎对 stem 重跑 spectral/beatgrid；结果按双轨合并",
-             "note": "分离伪迹 ≠ 生成痕迹；分离模型自身会引入伪迹，任何 stem 异常先与模型基线比对"},
-            "声部级取证（全混音无法定位的疑点）",
-            blinded=blinded, extra={"file_sha256": sha}))
+        model, pinned = _pick_uvr_model(_load_uvr_registry())
+        if not pinned:
+            # model_unpinned: no real model registered — issue a blocker card
+            # instead of a card that pretends to pin an identity
+            cards.append({
+                "task_id": "UVR-001", "protocol": PROTOCOL, "blinded": False,
+                "round_id": int(round_id),
+                "tool": {"name": "Ultimate Vocal Remover 5",
+                          "module": "2-Stage Separation", "version": "n/a"},
+                "segment": {"start_s": round(seg[0], 2), "end_s": round(seg[1], 2),
+                             "selection_rule": "按统一规则选取"},
+                "hypothesis_zh": "模型未锁定（model_unpinned）——禁止执行分离取证",
+                "hypothesis_en": "model not pinned — separation forensics blocked",
+                "steps_zh": ["在 config/uvr_models.toml 登记真实模型"
+                             "（名称/版本/模型文件 SHA-256）后重新生成任务",
+                             "禁止用未登记模型执行取证分离"],
+                "record_fields": {},
+                "acceptance": {"confirm": "n/a", "refute": "n/a"},
+                "evidence_gap": "model_unpinned",
+                "file_sha256": sha, "model_pinned": False, "model_unpinned": True,
+            })
+        else:
+            cards.append(_card(
+                "UVR-001",
+                {"name": "Ultimate Vocal Remover 5", "module": "2-Stage Separation",
+                 "version": "由执行人记录", "model": model, "model_pinned": True},
+                seg,
+                "分离人声/伴奏后，分别检查声部内异常（注意：分离伪迹 ≠ 生成痕迹）",
+                "Inspect separated stems for within-stem anomalies (separation artifacts ≠ generation artifacts)",
+                [
+                    f"1. 使用任务指定的模型：{model['name']} v{model['version']}"
+                    f" (sha256 {model['sha256'][:16]}…)，任何偏离必须写进回传 deviations",
+                    f"2. 只对 {seg[0]:.1f}s – {seg[1]:.1f}s 片段做 2-stem（Vocals/Instrumental）分离",
+                    "3. 导出两个 stem 文件（保持原始采样率，不做任何后处理）",
+                    "4. 回传 stem 文件 + 模型设置截图；后续频谱/时序分析由引擎自动完成",
+                ],
+                {"vocal_stem": "文件", "instrumental_stem": "文件",
+                 "model_name": "字符串（必须与卡片一致）", "model_version": "字符串",
+                 "model_sha256": "模型文件 SHA-256（与卡片一致，偏离记录 deviations）",
+                 "uvr5_version": "字符串", "segment_size": "字符串",
+                 "overlap": "字符串", "output_sample_rate": "数值",
+                 "post_processing": "none（禁止后处理）",
+                 "stem_vocal_sha256": "回传 stem 的 SHA-256",
+                 "stem_instrumental_sha256": "回传 stem 的 SHA-256",
+                 "settings_screenshot": "settings.png"},
+                {"interpretation": "引擎对 stem 重跑 spectral/beatgrid；结果按双轨合并",
+                 "note": "分离伪迹 ≠ 生成痕迹；分离模型自身会引入伪迹，任何 stem 异常先与模型基线比对"},
+                "声部级取证（全混音无法定位的疑点）",
+                blinded=blinded, extra={"file_sha256": sha, "model": model,
+                                        "model_pinned": True}))
 
-    # Identity stamps AFTER all cards are built: instance ids distinguish
-    # repeated rounds of the same task type on one file.
+    # Identity stamps AFTER all cards are built. round_id distinguishes
+    # repeated rounds of the same task type on one case; card_sha256
+    # fingerprints the card content (excluding itself and operator views).
     from .submission import card_fingerprint
     for c in cards:
-        c["task_instance_id"] = f"{c['task_id']}-{c['file_sha256'][:8]}"
+        c["round_id"] = int(round_id)
+        c["task_instance_id"] = f"R{int(round_id):02d}-{c['task_id']}-{c['file_sha256'][:8]}"
         c["card_sha256"] = card_fingerprint(c)
 
     # Hypothesis-blinded operator views: attach AFTER identity stamps.

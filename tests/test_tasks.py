@@ -108,9 +108,12 @@ class TaskCardTests(unittest.TestCase):
         self.assertIn("UVR-001", ids)
         self.assertIn("PA-001", ids)
         uvr = next(t for t in cards if t["task_id"] == "UVR-001")
-        self.assertIn("使用任务指定的模型", " ".join(uvr["steps_zh"]))
-        self.assertIn("model_sha256", uvr["record_fields"])
-        self.assertIn("分离伪迹", uvr["acceptance"]["note"])
+        # no real model registered in config/uvr_models.toml -> blocked card
+        self.assertTrue(uvr.get("model_unpinned"))
+        self.assertIn("模型未锁定", uvr["hypothesis_zh"])
+        self.assertNotIn("model_sha256", uvr["record_fields"])
+        self.assertEqual(uvr["acceptance"], {"confirm": "n/a", "refute": "n/a"})
+        self.assertIn("model_unpinned", uvr["evidence_gap"])
 
     def test_file_sha256_recorded(self):
         cards = tasks.generate_tasks(self.rich)

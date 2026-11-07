@@ -1,71 +1,82 @@
-# AkiForensics v0.3.1 — 2026-11-07
+# AkiForensics v0.3.2 — 2026-11-07
 
-Adversarial review round 3 response: all six main claims reproduced and fixed,
-evidence-model v3.1 hardening. Thresholds unchanged (v0-n1.1).
+Adversarial review round 4 response: rendered-HTML blindness, task identity
+lifecycle, evidence interpretation layer. Thresholds unchanged (v0-n1.1).
 
-## P0 (all reproduced before fixing)
+## P0 — true hypothesis-blinding (render layer + isolation)
 
-- **report.json PCM leak**: `_stereo` working array was serialized into JSON
-  (17.2 MB for a 10 s file). `_jsonable` now strips ALL underscore-prefixed
-  runtime keys; new integration test asserts real engine output serializes
-  without `_stereo`/`_plotdata` and under a 2 MB sanity cap.
-- **LIKELY_HUMAN with spectral `na`**: lossy-container input could grade
-  LIKELY_HUMAN with zero spectral information. Now requires MEASURED
-  `no_anomaly_detected`; `na` ⇒ INCONCLUSIVE. Regression: MP3 + locked grid
-  → INCONCLUSIVE.
-- **FLAC MD5 all-zero field** (RFC 9639 §8.2): treated as unknown, never a
-  mismatch; unit-tested via direct injection.
+- `_tasks_html` used the ANALYST record_fields even when showing the operator
+  view (the R4 leak, found by review at runtime). Record schema now follows
+  the shown view.
+- **Two report files**: `analyst_report.html` (verdict, engine values, acceptance
+  criteria) + `operator_tasks.html` (task/tool/segment/steps/record ONLY — no
+  verdict, no engine numbers, no analyst wording). Operator file is safe to
+  hand to the executor whole.
+- selection_rule neutralized in operator views ("按统一规则选取——选择依据不向
+  执行人公开"); blind steps now survey the FULL band (no 5–22 kHz hint).
+- New test class exercises real `render_html` output: operator file must not
+  contain the verdict (raw or spaced), engine cutoff value, analyst field
+  names, or analyst acceptance wording; must contain the neutral rule.
 
-## Verdict hardening (v3.1)
+## P0 — task identity lifecycle
 
-- Convergence requires the SPECTRAL fingerprint: metadata INTEGRITY anomalies
-  can raise a standalone DELIVERY_CHAIN_ANOMALY but never upgrade to
-  AI_EVIDENCE_CONVERGENT (they may be corruption, not transcoding).
-- Dedicated `alternative_hypotheses` for the timing-only branch (live
-  performance / kick-detection error / genre applicability) — no longer
-  reuses the convergent list.
-- Every verdict carries `calibration_status: preliminary`,
-  `human_reference_status: insufficient`, `probability_calibrated: false`.
+- `card_fingerprint` excludes `card_sha256` itself (self-referential
+  stability; was non-reproducible at merge time).
+- `round_id` parameter: instance ids are now `R{round}-{task}-{sha8}` and
+  DIFFER across rounds of the same file (was deterministic per file+task).
+- Strict identity validation: submissions MUST carry matching
+  `task_instance_id` AND `card_sha256`; missing or stale = rejected.
+- CLI locates cards by instance id first, falls back to task_id.
 
-## Engineering
+## P1 — submission interpretation layer
 
-- Native channel layout: `decode_work(channels=)` passed from probe — no
-  `-ac 2` collapse of mono/multichannel sources.
-- Full decode-error scan decoupled from SEEKTABLE presence.
-- True hypothesis-blinded operator view: neutral full-band survey steps
-  (`blind_steps_zh`) + generic record schema (`boundaries: [{freq_hz, note}]`)
-  — field names like `cutoff_hz_left` no longer leak the target; HTML task
-  table renders the operator view, never the analyst card; leakage asserted
-  in tests.
-- Submission identity: `task_instance_id` + `card_sha256` on cards, validated
-  on merge (stale-card submissions rejected); value type validation;
-  `comparison_basis` marks engine-mono vs per-channel human comparisons as
-  indicative only; merge-submission now regenerates the HTML report.
-- UVR-001: structured `model {name, version, sha256}` object on the card
-  (was doc-only in v0.3.0 — caught by review).
-- RX-003 redefined as Multi-Resolution MEASUREMENT ROBUSTNESS: FFT-size
-  stability validates the boundary estimate, it does NOT discriminate codec
-  cutoff vs human EQ (a real filter's cutoff does not move with FFT size
-  either — the v0.3.0 claim was wrong).
-- calibrate.py: brick-wall rate + median/P10/P90 for cutoff, cliff depth and
-  HF variability per class; output explicitly framed as proposal-only.
-- Corpus naming: "Suno Reference Set" (not a general AI-music set) across
-  config/docs; three-version note (software / protocol 1.0 / thresholds).
+- `comparison_strength` (authoritative / indicative / descriptive): RX-001
+  mono-vs-per-channel checks are `indicative` and can only produce
+  `agreement_indicative` / `contradiction_indicative` — never formal
+  agreement/contradiction until per-channel spectral analysis ships.
+- `reevaluate()` explicit entry point + per-task interpretation rules: merge
+  produces an evidence interpretation and a re-evaluation RECOMMENDATION;
+  the source verdict is never auto-flipped by a human return (the session AI
+  applies card acceptance criteria across all evidence).
+- merge-submission prints interpretation + verdict-before/after.
 
-## Bonus robustness fix
+## P1 — UVR model registry
 
-Pure-noise input (no kicks) crashed `_fit_grid` with an empty-vector polyfit
-(two paths). Guarded; regression via full-flow walled-noise analysis
-(beatgrid `na` + RX-001 card issued).
+- `config/uvr_models.toml` (real values only — name/version/MODEL-FILE
+  sha256/architecture). Cards without a valid entry are `model_unpinned` and
+  separation forensics are BLOCKED (no placeholder identities — the v0.3.0/3.1
+  doc/code desync is closed at the code level).
+- Returns now require UVR5 version, segment size, overlap, output rate,
+  post-processing (none) and both stem SHA-256s.
+
+## P2 — verdict semantics
+
+- `LIKELY_HUMAN` → `QUANTIZED_PRODUCTION_CONSISTENT` (the evidence is
+  production-consistency for a quantized render, not authorship).
+- `FILE_INTEGRITY_ANOMALY` split from `DELIVERY_CHAIN_ANOMALY` (metadata
+  integrity issues may be corruption, not transcoding).
+- `delivery_chain_fused: true` (always) replaced by three honest flags:
+  `delivery_chain_detected` / `metadata_integrity_correlated` /
+  `evidence_family_fusion_applied`; stale convergent wording fixed.
+- Multichannel: native layout preserved + `channels_meta` (count/layout/
+  downmix method) with >2ch marked EXPERIMENTAL (equal-mean downmix is not
+  channel-aware; full multichannel DSP is future work).
+
+## Corpus
+
+`corpus/` skeleton adopted from review §十一 (human/ai/hybrid classes,
+manifest schema, discipline rules: no cross-class transcodes, per-work
+splits). Audio stays local; only manifests may ever be committed.
 
 ## Tests
 
-51 tests (was 46): serialization-leak integration, MD5 zero guard,
-LIKELY_HUMAN lossy-container block, integrity-never-upgrades-convergent,
-operator-view leakage assertions (no `cutoff_hz` in operator blob, no analyst
-wording in HTML), blinding levels with generic blind schema, card identity.
+65 (was 51): new `test_acceptance_r4.py` — rendered-HTML leakage (both
+files), fingerprint self-stability, round-distinct instance ids, strict
+identity rejection (missing/wrong round/wrong card), reevaluate
+never-mutates, UVR unpinned blocking.
 
 ## Review loop
 
-Full adjudication: `AkiForensics-Response-R4.md` (round-3 review: 6/6 claims
-verified — strongest round so far; RX-003 methodology corrected on our side).
+`AkiForensics-Response-R5.md` adjudicates round 4: 5/6 claims verified
+(one check-string error on our side — the verdict WAS in the single HTML);
+v0.3.2 acceptance target = the full loop defined by the reviewer.

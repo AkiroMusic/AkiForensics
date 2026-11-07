@@ -138,8 +138,8 @@ def aggregate(metadata: dict, spectral: dict, beatgrid: dict,
 
     if bg == "timing_variation" and delivery_anomaly:
         verdict = "AI_EVIDENCE_CONVERGENT"
-        positive = ("timing variability (audio-intrinsic) + delivery-chain anomaly "
-                    "(correlated group: spectral/metadata-integrity)")
+        positive = ("timing variability (audio-intrinsic) + spectral lossy-source "
+                    "fingerprint (delivery-chain family, fused as one vote)")
         alternatives = _ALT_AI_CONVERGENT
         human_gate = True
     elif bg == "timing_variation":
@@ -148,17 +148,22 @@ def aggregate(metadata: dict, spectral: dict, beatgrid: dict,
         alternatives = _ALT_AI_TIMING_ONLY
         human_gate = False
     elif bg == "timing_locked" and sp == "no_anomaly_detected" and md == "clean":
-        verdict = "LIKELY_HUMAN"
+        verdict = "QUANTIZED_PRODUCTION_CONSISTENT"
         positive = ("sample-locked grid + MEASURED full-band spectrum + clean metadata "
-                    "(production-consistency evidence, not authorship proof)")
+                    "(production-consistency evidence for a quantized render — "
+                    "NOT authorship proof)")
         alternatives = _ALT_HUMAN
         human_gate = False
-    elif delivery_anomaly or integrity_anomaly:
+    elif delivery_anomaly:
         verdict = "DELIVERY_CHAIN_ANOMALY"
-        why = ("spectral lossy-source fingerprint" if delivery_anomaly
-              else "metadata integrity anomalies (corruption/editing possible)")
-        positive = (f"{why} only; commonly a transcode of a human OR an AI master — "
-                    "timing leg gave no evidence")
+        positive = ("spectral lossy-source fingerprint only; commonly a transcode of "
+                    "a human OR an AI master — timing leg gave no evidence")
+        alternatives = []
+        human_gate = False
+    elif integrity_anomaly:
+        verdict = "FILE_INTEGRITY_ANOMALY"
+        positive = ("metadata integrity anomalies only (corruption / editing / "
+                    "bad tooling possible) — NOT transcode evidence, no source claim")
         alternatives = []
         human_gate = False
     else:
@@ -173,5 +178,8 @@ def aggregate(metadata: dict, spectral: dict, beatgrid: dict,
             "calibration_status": "preliminary",
             "human_reference_status": "insufficient",
             "probability_calibrated": False,
-            "legs": legs, "delivery_chain_fused": True,
+            "legs": legs,
+            "delivery_chain_detected": delivery_anomaly,
+            "metadata_integrity_correlated": integrity_anomaly and delivery_anomaly,
+            "evidence_family_fusion_applied": delivery_anomaly and bg == "timing_variation",
             "threshold_version": version, "disclaimer": _disclaimer(version)}

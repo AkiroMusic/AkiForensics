@@ -1,0 +1,14 @@
+# AkiForensics UVR model registry — REAL values only / 只登记真实模型
+# Register the model file you actually use for forensic separation.
+# sha256 = hash of the MODEL FILE itself (not the audio).
+# A card generated without a valid entry here is marked model_unpinned and
+# separation forensics are blocked (no placeholder identities).
+#
+# Example shape (fill with real values, do not commit fake entries):
+# [models.vocal_a]
+# name = "UVR-DeNoise-A"        # actual model name in UVR5
+# version = "1.0"                # actual version
+# sha256 = "<64-hex hash of the .pth model file>"
+# architecture = "MDX-Net"       # e.g. MDX-Net / VR-Architecture / Demucs
+
+[models]

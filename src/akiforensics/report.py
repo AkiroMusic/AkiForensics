@@ -169,7 +169,8 @@ def _tasks_html(tasks_list: list[dict]) -> str:
         hyp = shown.get("hypothesis_zh") or shown.get("instruction_zh", "")
         gap = shown.get("evidence_gap", "—")
         rec = "; ".join(f"<code>{_html.escape(k)}</code>: {_html.escape(str(v))}"
-                        for k, v in t["record_fields"].items())
+                        for k, v in shown.get("record_fields",
+                                              t["record_fields"]).items())
         rows += f"""<tr><td><b>{_html.escape(t['task_id'])}</b><br>
 <span class="zh">盲化 {"开" if t['blinded'] else "关"}</span></td>
 <td>{_html.escape(t['tool']['name'])}<br><span class="zh">{_html.escape(t['tool']['module'])}</span></td>
@@ -284,10 +285,44 @@ legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '
 <h2>6 · Method 方法</h2>
 <p>EN · Timing: 30–130 Hz kick isolation, RANSAC tempo/phase scan, linear grid fit, grid-position cross-correlated sub-ms refinement. Spectral: 8192-pt Hann spectrogram, brick-wall cliff detection vs 14–20 kHz reference band. Metadata: streamed FLAC block inventory + STREAMINFO MD5 verify + tag fingerprints. Delivery-chain findings are fused as one correlated vote, never summed.</p>
 <p class="zh">中文 · 时序：30–130 Hz 底鼓分离、RANSAC 速度/相位扫描、线性网格拟合、网格位置互相关亚毫秒精化。频谱：8192 点 Hann 频谱图、以 14–20 kHz 参考频带做砖墙悬崖检测。元数据：流式 FLAC 块清单 + STREAMINFO MD5 校验 + 平台 tag 指纹。交付链发现按相关性合票，不叠加计分。</p>
-<footer>AkiForensics v0.3.1 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
+<footer>AkiForensics v0.3.2 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
 </div></body></html>"""
-    out = outdir / "report.html"
+    out = outdir / "analyst_report.html"
     out.write_text(html, encoding="utf-8")
+    # Operator file: task sheets ONLY — no verdict, no engine measurements,
+    # no analyst hypothesis/gap/acceptance wording.
+    ops_rows = ""
+    for t in result.get("manual_tasks", []):
+        shown = t.get("operator_view") if "operator_view" in t else t
+        steps = "<br>".join(_html.escape(x) for x in shown.get("steps_zh", []))
+        rec = "<br>".join(f"<code>{_html.escape(k)}</code>: {_html.escape(str(v))}"
+                          for k, v in shown.get("record_fields", {}).items())
+        sel = shown.get("segment", {}).get("selection_rule", "")
+        sel_html = (f"<br><span class='zh'>{_html.escape(sel)}</span>" if sel else "")
+        ops_rows += f"""<tr><td><b>{_html.escape(t['task_id'])}</b></td>
+<td>{_html.escape(t['tool']['name'])}<br><span class="zh">{_html.escape(t['tool']['module'])}</span></td>
+<td>{t['segment']['start_s']} – {t['segment']['end_s']} s{sel_html}</td>
+<td>{steps}</td><td>{rec}</td></tr>"""
+    ops_head = ("请按步骤独立完成测量并如实记录；不要向 AI 询问任何预期值，也不要根据既往分析"
+                "推测目标结果。回传数值表与截图（设置必须入镜）。<br>"
+                "Complete the measurements independently and return the number sheet "
+                "+ screenshots (settings in frame).")
+    ops_html = f"""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
+<title>AkiForensics — Operator Tasks 操作任务单</title><style>
+body{{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#0d1117;color:#d9e1ea;line-height:1.7}}
+.page{{max-width:900px;margin:0 auto;background:#151b23;padding:40px 52px}}
+h1{{font-size:1.4em;border-bottom:3px solid var(--accent,#6cb2ff);padding-bottom:.3em}}
+table{{border-collapse:collapse;width:100%;margin:1em 0;font-size:.9em}}
+th,td{{border:1px solid #2a3441;padding:6px 10px;text-align:left;vertical-align:top}}
+th{{background:#1c242e;color:#a8c7e8}}tr:nth-child(even) td{{background:#181f28}}
+code{{background:#212a35;padding:1px 5px;border-radius:3px;font-size:.88em}}
+.zh{{color:#b9c6d4}}</style></head><body><div class="page">
+<h1>Operator Tasks 操作任务单</h1>
+<p class="zh">{ops_head}</p>
+<table><tr><th>Task 任务</th><th>Tool 工具</th><th>Segment 分段 (s)</th><th>Steps 步骤</th><th>Record 记录</th></tr>{ops_rows}</table>
+<footer>AkiForensics operator sheet · 本文件不含分析结论，可整份交给执行人。</footer>
+</div></body></html>"""
+    (outdir / "operator_tasks.html").write_text(ops_html, encoding="utf-8")
     return str(out)
 
 

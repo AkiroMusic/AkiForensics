@@ -52,7 +52,10 @@ class SubmissionTests(unittest.TestCase):
     def _submission(self, **over):
         fields = {k: None for k in self.card["record_fields"] if k != "screenshots"}
         fields.update(over.pop("values", {}))
-        sub = {"task_id": self.card["task_id"], "file_sha256": self.sha,
+        sub = {"task_id": self.card["task_id"],
+               "task_instance_id": self.card["task_instance_id"],
+               "card_sha256": self.card["card_sha256"],
+               "file_sha256": self.sha,
                "values": fields, "screenshots": [], "operator_notes": "ok",
                "deviations": ""}
         sub.update(over)
@@ -74,13 +77,18 @@ class SubmissionTests(unittest.TestCase):
             self.skipTest("fixture produced no RX-001 card")
         eng = self.analysis["spectral"]["cutoff_hz"]
         sub = {"task_id": "RX-001", "file_sha256": self.sha,
+               "task_instance_id": rx["task_instance_id"],
+               "card_sha256": rx["card_sha256"],
                "values": {k: None for k in rx["record_fields"] if k != "screenshots"},
                "screenshots": [], "operator_notes": "", "deviations": ""}
         sub["values"]["cutoff_hz_left"] = eng
         sub["values"]["cutoff_hz_right"] = eng
         merged = submission.merge(sub, self.analysis, rx)
         ev = merged["human_evidence"][-1]
-        self.assertEqual(ev["summary"], "agreement")
+        # RX-001 comparisons are indicative — never a formal "agreement"
+        self.assertEqual(ev["summary"], "agreement_indicative")
+        self.assertEqual(ev["comparison_strength"], "indicative")
+        self.assertIn("interpretation", merged["verdict_reevaluation"])
 
     def test_contradiction_detected(self):
         rx = next((t for t in self.analysis["manual_tasks"]
@@ -88,12 +96,14 @@ class SubmissionTests(unittest.TestCase):
         if rx is None:
             self.skipTest("fixture produced no RX-001 card")
         sub = {"task_id": "RX-001", "file_sha256": self.sha,
+               "task_instance_id": rx["task_instance_id"],
+               "card_sha256": rx["card_sha256"],
                "values": {k: None for k in rx["record_fields"] if k != "screenshots"},
                "screenshots": [], "operator_notes": "", "deviations": ""}
         sub["values"]["cutoff_hz_left"] = (self.analysis["spectral"]["cutoff_hz"] or 0) + 2000
         merged = submission.merge(sub, self.analysis, rx)
         ev = merged["human_evidence"][-1]
-        self.assertEqual(ev["summary"], "contradiction")
+        self.assertEqual(ev["summary"], "contradiction_indicative")
         self.assertIn("contradiction", ev["comparisons"][0]["result"])
 
     def test_validation_failures(self):
@@ -114,6 +124,8 @@ class SubmissionTests(unittest.TestCase):
         if rx is None:
             self.skipTest("fixture produced no RX-001 card")
         sub = {"task_id": "RX-001", "file_sha256": self.sha,
+               "task_instance_id": rx["task_instance_id"],
+               "card_sha256": rx["card_sha256"],
                "values": {k: None for k in rx["record_fields"] if k != "screenshots"},
                "screenshots": [], "operator_notes": "", "deviations": ""}
         sub["values"]["cutoff_hz_left"] = 99999

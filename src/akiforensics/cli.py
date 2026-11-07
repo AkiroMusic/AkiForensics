@@ -60,10 +60,17 @@ def cmd_merge_submission(args) -> int:
     rpath = Path(args.report)
     analysis = json.loads(rpath.read_text(encoding="utf-8"))
     sub = submission.load_submission(args.submission)
-    card = next((t for t in analysis.get("manual_tasks", [])
-                 if t["task_id"] == sub.get("task_id")), None)
+    card = None
+    for t in analysis.get("manual_tasks", []):
+        if sub.get("task_instance_id"):
+            if t.get("task_instance_id") == sub["task_instance_id"]:
+                card = t
+                break
+        elif t.get("task_id") == sub.get("task_id"):
+            card = t
+            break
     if card is None:
-        print(f"error: task {sub.get('task_id')} not in this report's manual_tasks")
+        print("error: no matching card (located by task_instance_id, else task_id)")
         return 2
     merged = submission.merge(sub, analysis, card)
     report.write_json(merged, rpath)
@@ -72,7 +79,12 @@ def cmd_merge_submission(args) -> int:
     except Exception as e:
         print(f"note: HTML regeneration failed ({e}); JSON is updated")
     ev = merged["human_evidence"][-1]
-    print(f"merged {ev['task_id']}: summary={ev['summary']}")
+    reev = merged.get("verdict_reevaluation", {})
+    print(f"merged {ev['task_id']} [{ev.get('task_instance_id')}]: summary={ev['summary']} "
+          f"(strength={ev.get('comparison_strength')})")
+    print(f"  interpretation: {reev.get('interpretation')}")
+    print(f"  verdict: {reev.get('verdict_before')} -> {reev.get('verdict_after')}"
+          f" (changed={reev.get('changed')})")
     for c in ev["comparisons"]:
         print(f"  {c['field']}: engine={c['engine']} human={c['human']} "
               f"tol={c['tolerance']} -> {c['result']}")

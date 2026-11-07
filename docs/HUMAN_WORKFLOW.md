@@ -63,7 +63,7 @@ Each: `present yes/no/unsure` + `timestamp_s` + note. Record listening environme
 ## UVR-001 · Stem separation (stage-2, on demand) 分离取证
 
 **Tool**: Ultimate Vocal Remover 5 · **Segment**: engine-computed 45 s excerpt only.
-**Fixed model/settings**: the card carries `model.name` / `model.version` / `model.checksum` (standardized at generation time); ANY deviation must be recorded in `deviations`. Stems are DERIVED evidence — subordinate to the original audio, never an independent source. Model identity: name + version + file SHA-256 from the card; deviations recorded. 只对片段做 2-stem；导出保持原始采样率、零后处理；回传 stem 文件 + 模型名/版本/校验和与设置截图。**后续频谱/时序分析由引擎自动重跑** — the human's job ends at operating the tool.
+**Fixed model/settings**: models are registered in `config/uvr_models.toml` (name / version / MODEL-FILE sha256 / architecture — real values only, never placeholders). Cards generated without a valid registry entry are marked `model_unpinned` and separation forensics are BLOCKED. A pinned card carries `model {name, version, sha256}`; ANY deviation must be recorded in `deviations`. Returns must also include UVR5 version, segment size, overlap, output sample rate, post-processing (must be none) and both stem-file SHA-256s. Stems are DERIVED evidence — subordinate to the original audio, never an independent source. 只对片段做 2-stem；导出保持原始采样率、零后处理；回传 stem 文件 + 模型名/版本/校验和与设置截图。**后续频谱/时序分析由引擎自动重跑** — the human's job ends at operating the tool.
 ⚠️ Separation artifacts ≠ generation artifacts. Stem anomalies are first compared against the model's baseline behavior; residuals are separation error, not "AI evidence". 分离伪迹 ≠ 生成痕迹。
 
 ## PA-001 · Realtime mastering profile 实时画像（描述性）

@@ -40,8 +40,11 @@ def _require(cond: bool, msg: str):
 
 
 def card_fingerprint(card: dict) -> str:
-    """Stable hash of the card content (sans operator_view/round info)."""
-    payload = {k: v for k, v in card.items() if k not in ("operator_view",)}
+    """Stable hash of the card content. Excludes operator_view AND the
+    card_sha256 field itself, so fingerprint(card) == fingerprint(stored_card)
+    at merge time (self-referential stability)."""
+    excluded = {"operator_view", "card_sha256"}
+    payload = {k: v for k, v in card.items() if k not in excluded}
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -54,10 +57,12 @@ def validate(submission: dict, card: dict) -> None:
              f"card={card['task_id']}")
     _require(submission.get("file_sha256") == card.get("file_sha256"),
              "file_sha256 does not match the analyzed file — wrong file returned?")
-    if card.get("card_sha256"):
-        _require(submission.get("card_sha256") in (None, card["card_sha256"]),
-                 "card_sha256 mismatch — submission answers a DIFFERENT card version "
-                 "(protocol/segment changed between rounds)")
+    _require(submission.get("task_instance_id") == card.get("task_instance_id"),
+             "task_instance_id mismatch — submission does not answer THIS card "
+             "instance (wrong round or wrong file)")
+    _require(submission.get("card_sha256") == card.get("card_sha256"),
+             "card_sha256 mismatch — submission answers a DIFFERENT card version "
+             "(protocol/segment changed between rounds)")
     values = submission.get("values")
     _require(isinstance(values, dict), "missing 'values' object")
     for k in card["record_fields"]:
@@ -107,10 +112,17 @@ def merge(submission: dict, analysis: dict, card: dict) -> dict:
             "result": _compare_numeric(eng_v, human_v, tol) if tol else "recorded",
         })
 
+    # comparison strength: RX-001 numeric checks are indicative until
+    # per-channel spectral analysis ships; only authoritative comparisons
+    # may drive formal agreement/contradiction summaries.
+    STRENGTH = {"RX-001": "indicative"}
+    strength = STRENGTH.get(card["task_id"], "indicative")
+
     evidence = {
         "task_id": card["task_id"],
         "task_instance_id": card.get("task_instance_id", card["task_id"]),
         "card_sha256": card_fingerprint(card),
+        "comparison_strength": strength,
         "source": {"type": "human_tool", "tool": card["tool"]["name"]},
         "values": values,
         "screenshots": submission.get("screenshots", []),
@@ -118,15 +130,20 @@ def merge(submission: dict, analysis: dict, card: dict) -> dict:
         "deviations": submission.get("deviations", ""),
         "blinded": card.get("blinded", True),
         "comparisons": comparisons,
-        "summary": ("agreement" if all(c["result"] == "agreement" for c in comparisons)
-                    and comparisons else
-                    "contradiction" if any(c["result"] == "contradiction"
-                                           for c in comparisons) else
+        "summary": ("agreement" if comparisons and strength == "authoritative"
+                    and all(c["result"] == "agreement" for c in comparisons) else
+                    "contradiction" if strength == "authoritative"
+                    and any(c["result"] == "contradiction" for c in comparisons) else
+                    "agreement_indicative" if comparisons
+                    and all(c["result"] == "agreement" for c in comparisons) else
+                    "contradiction_indicative" if any(c["result"] == "contradiction"
+                                                      for c in comparisons) else
                     "recorded"),
     }
     out = dict(analysis)
     out.pop("_stereo", None)  # working arrays never enter persisted evidence
     out["human_evidence"] = out.get("human_evidence", []) + [evidence]
+    out["verdict_reevaluation"] = reevaluate(evidence, out)
     return out
 
 
@@ -135,3 +152,41 @@ def load_submission(path: str | Path) -> dict:
         sub = json.load(f)
     _require(isinstance(sub, dict), "submission file must contain a JSON object")
     return sub
+
+# Per-task interpretation rules: what a human return MEANS for the case.
+# The session AI applies card acceptance criteria to these interpretations —
+# the source verdict is never auto-flipped by a human return.
+_INTERPRETATIONS = {
+    "RX-001": {
+        "agreement_indicative": "人工分声道测量与引擎 mono 截止一致（指示性）：有损源"
+                                "指纹方向获得独立方法学佐证，置信提升一档",
+        "contradiction_indicative": "人工测量与引擎不一致：两值均保留，需换段/换工具"
+                                    "复核（矛盾不裁决，只加证）",
+        "recorded": "人工测量已入库（含 null 合法值）",
+    },
+    "RX-002": {"recorded": "kick 波形一致性作为制作方式辅助上下文（中性线索）"},
+    "DAW-001": {"recorded": "结构化听检为主观证据，永不单独定来源；≥2 项人声 yes 时建议 UVR-001"},
+    "PA-001": {"recorded": "母带画像（描述性），不参与来源评分"},
+    "UVR-001": {"recorded": "stem 为衍生证据；引擎重跑声部分析后按双轨合并"},
+}
+
+
+def reevaluate(evidence: dict, analysis: dict) -> dict:
+    """Explicit verdict re-evaluation entry point: applies the evidence
+    summary to the current verdict and returns a RECOMMENDATION — the
+    verdict object itself is never mutated here."""
+    task = evidence["task_id"]
+    interp = _INTERPRETATIONS.get(task, {}).get(
+        evidence["summary"], "已记录（无预定义解释规则）")
+    return {
+        "task_instance_id": evidence.get("task_instance_id"),
+        "evidence_summary": evidence["summary"],
+        "comparison_strength": evidence.get("comparison_strength", "indicative"),
+        "interpretation": interp,
+        "verdict_before": (analysis.get("verdict") or {}).get("verdict"),
+        "verdict_after": (analysis.get("verdict") or {}).get("verdict"),
+        "changed": False,
+        "note": ("evidence ingestion only — verdict changes require the session "
+                 "AI to apply the card's acceptance criteria across ALL evidence, "
+                 "or a corpus-calibrated rule update"),
+    }

@@ -38,6 +38,14 @@ def analyze_single(path: str | Path, cfg: dict | None = None,
         "spectral": spec,
         "beatgrid": beats,
         "verdict": verd,
+        "channels_meta": {
+            "channel_count": int(audio.get("channels") or 1),
+            "layout": audio.get("channel_layout") or "unknown",
+            "downmix_method": ("equal-mean-2ch" if (audio.get("channels") or 1) == 2
+                               else "experimental-equal-mean-multichannel"),
+            "multichannel_support": ("experimental" if (audio.get("channels") or 1) > 2
+                                      else "stable"),
+        },
         "_stereo": stereo,
     }
     if generate_task_cards:

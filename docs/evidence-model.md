@@ -27,10 +27,11 @@ Cutoff wall, codec noise bed, and metadata anomalies typically originate from a 
 
 | Verdict | Requires 要求 | Standing alternatives 必列替代假设 |
 |---|---|---|
-| `AI_EVIDENCE_CONVERGENT` | `timing_variation` **and** delivery-chain anomaly 收敛；auto-issues the listening gate 自动签发听检门 | unquantized live performance + lossy transcode of a human master |
+| `AI_EVIDENCE_CONVERGENT` | `timing_variation` **and** SPECTRAL lossy-source fingerprint 收敛（metadata integrity 永不参与升级）；auto-issues the listening gate 自动签发听检门 | unquantized live performance + lossy transcode of a human master |
 | `LIKELY_AI` | `timing_variation` alone（音频内在证据，无交付链佐证） | same as above |
-| `LIKELY_HUMAN` | `timing_locked` **and** spectral `no_anomaly_detected` (MEASURED, not `na`) **and** clean metadata 制作一致性而非作者身份；lossy 容器下 spectral 为 `na` ⇒ 证据不全，不进入此判定 | loop/sampler-based AI-hybrid production |
-| `DELIVERY_CHAIN_ANOMALY` | Delivery anomaly without timing evidence — attribution withheld 归因保留 | n/a (no attribution made) |
+| `QUANTIZED_PRODUCTION_CONSISTENT` | `timing_locked` **and** spectral `no_anomaly_detected` (MEASURED, not `na`) **and** clean metadata — production-consistency for a quantized render, NOT authorship 制作一致性而非作者身份；lossy 容器下 spectral 为 `na` ⇒ 证据不全，不进入此判定 | loop/sampler-based AI-hybrid production |
+| `DELIVERY_CHAIN_ANOMALY` | Spectral lossy-source fingerprint without timing evidence — attribution withheld 归因保留 | n/a (no attribution made) |
+| `FILE_INTEGRITY_ANOMALY` | Metadata INTEGRITY anomalies only — corruption/editing possible, NOT transcode evidence 完整性异常非转码证据 | n/a |
 | `INCONCLUSIVE` | No positive evidence 无正向证据 | n/a |
 
 Source-leaning verdicts MUST carry `alternative_hypotheses`（来源倾向判定必须披露剩余解释）. Absence of anomalies is never positive evidence. 无异常永远不是正向证据。

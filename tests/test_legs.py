@@ -176,7 +176,8 @@ class VerdictAggregationTests(unittest.TestCase):
         out = verdict.aggregate(self._meta(["decoder_errors"], fams),
                                 self._sp(True, 20462), self._bg(2.3, 7.0), "flac", CFG)
         self.assertEqual(out["verdict"], "AI_EVIDENCE_CONVERGENT")
-        self.assertTrue(out["delivery_chain_fused"])
+        self.assertTrue(out["evidence_family_fusion_applied"])
+        self.assertTrue(out["delivery_chain_detected"])
         self.assertTrue(out["alternative_hypotheses"])
         self.assertTrue(out["human_gate_recommended"])
         self.assertTrue(out["disclaimer"].startswith(f"Thresholds {CFG['meta']['version']}"))
@@ -191,7 +192,7 @@ class VerdictAggregationTests(unittest.TestCase):
     def test_likely_human_requires_positive_everywhere(self):
         out = verdict.aggregate(self._meta([]), self._sp(False, None),
                                 self._bg(0.3, 95.0), "flac", CFG)
-        self.assertEqual(out["verdict"], "LIKELY_HUMAN")
+        self.assertEqual(out["verdict"], "QUANTIZED_PRODUCTION_CONSISTENT")
         # production-consistency, not authorship: alternative must be listed
         self.assertIn("AI-hybrid", out["alternative_hypotheses"][0])
 
@@ -235,12 +236,13 @@ class VerdictAggregationTests(unittest.TestCase):
             self._sp(False, None), self._bg(0.0, 0.0, applicable=False), "flac", CFG)
         self.assertEqual(out["verdict"], "INCONCLUSIVE")
 
-    def test_integrity_flag_votes_into_delivery(self):
+    def test_integrity_flag_is_file_anomaly_not_delivery(self):
         out = verdict.aggregate(
             self._meta(["md5_mismatch"],
                        {"integrity": ["md5_mismatch"], "packaging": [], "provenance": []}),
             self._sp(False, None), self._bg(0.0, 0.0, applicable=False), "flac", CFG)
-        self.assertEqual(out["verdict"], "DELIVERY_CHAIN_ANOMALY")
+        self.assertEqual(out["verdict"], "FILE_INTEGRITY_ANOMALY")
+        self.assertFalse(out["delivery_chain_detected"])
 
 
 if __name__ == "__main__":
