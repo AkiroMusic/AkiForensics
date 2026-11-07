@@ -152,8 +152,9 @@ def _operator_view(card: dict) -> dict:
                   "boundaries_right": "数组：[{freq_hz, note}] 或 none",
                   "tool_version": "字符串"}
     segment = dict(card["segment"])
-    if "blind_steps_zh" in card:
-        segment["selection_rule"] = "按统一规则选取（选择依据不向执行人公开）"
+    # ALWAYS neutralize: "engine selected by detected features" tells the
+    # operator that something was found, even when steps stay analyst-grade.
+    segment["selection_rule"] = "按统一规则选取（选择依据不向执行人公开）"
     return {"task_id": card["task_id"], "protocol": card["protocol"],
             "tool": card["tool"], "segment": segment,
             "steps_zh": steps, "record_fields": record,
