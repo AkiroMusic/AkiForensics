@@ -180,3 +180,49 @@ class UvrRegistryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DualFileLevelAuditTests(unittest.TestCase):
+    """Round-5 acceptance regression: the operator file is audited at BOTH
+    blinding levels — value level must hide engine VALUES/verdict; hypothesis
+    level must additionally hide target field names."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fx = fx.FixtureDir()
+        cls.tmp = Path(tempfile.mkdtemp(prefix="akif_lvl_"))
+        noise = fx.render_band_noise(cls.fx.dir / "lv_n.wav", cutoff_hz=20500)
+        flac = fx.wav_to_flac(noise, cls.fx.dir / "lv.flac")
+        cls.r_v = analyze_single(str(flac), blinding_level="value")
+        cls.r_h = analyze_single(str(flac), blinding_level="hypothesis")
+        d_v, d_h = cls.tmp / "v", cls.tmp / "h"
+        d_v.mkdir(); d_h.mkdir()
+        report.render_html(cls.r_v, d_v)
+        report.render_html(cls.r_h, d_h)
+        cls.ops_v = (d_v / "operator_tasks.html").read_text("utf-8")
+        cls.ops_h = (d_h / "operator_tasks.html").read_text("utf-8")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.fx.cleanup()
+        import shutil
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_value_level_hides_engine_values_and_verdict(self):
+        co = self.r_v["spectral"]["cutoff_hz"]
+        self.assertIsNotNone(co)
+        for leak in (f"{co:.0f}", self.r_v["verdict"]["verdict"],
+                     self.r_v["verdict"]["verdict"].replace("_", " ")):
+            self.assertNotIn(leak, self.ops_v)
+
+    def test_value_level_may_show_target_field_names(self):
+        self.assertIn("cutoff_hz_left", self.ops_v)  # target-blinded by design
+
+    def test_hypothesis_level_hides_target_fields(self):
+        for name in ("cutoff_hz_left", "cutoff_hz_right",
+                     "wall_stable_across_subsegments"):
+            self.assertNotIn(name, self.ops_h)
+
+    def test_neither_level_carries_plots_or_paths(self):
+        for ops in (self.ops_v, self.ops_h):
+            self.assertNotIn("<img", ops)

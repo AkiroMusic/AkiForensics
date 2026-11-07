@@ -52,6 +52,10 @@ def card_fingerprint(card: dict) -> str:
 def validate(submission: dict, card: dict) -> None:
     """Structural validation against the task card."""
     _require(isinstance(submission, dict), "submission must be a JSON object")
+    if card.get("model_unpinned"):
+        raise SubmissionError(
+            "model_unpinned — stem submissions are BLOCKED until a real model "
+            "is registered in config/uvr_models.toml (enforcement, not a hint)")
     _require(submission.get("task_id") == card["task_id"],
              f"task_id mismatch: submission={submission.get('task_id')} "
              f"card={card['task_id']}")
@@ -143,6 +147,9 @@ def merge(submission: dict, analysis: dict, card: dict) -> dict:
     out = dict(analysis)
     out.pop("_stereo", None)  # working arrays never enter persisted evidence
     out["human_evidence"] = out.get("human_evidence", []) + [evidence]
+    # evidence_revision advances on every accepted human return; both reports
+    # are regenerated from this same snapshot (version consistency).
+    out["evidence_revision"] = int(analysis.get("evidence_revision") or 0) + 1
     out["verdict_reevaluation"] = reevaluate(evidence, out)
     return out
 

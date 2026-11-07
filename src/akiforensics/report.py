@@ -190,6 +190,8 @@ def render_html(result: dict, outdir: str | Path) -> str:
     plots = render_plots(result, outdir)
     f = result["file"]; v = result["verdict"]
     b = result["beatgrid"]; s = result["spectral"]; m = result["metadata"]
+    revision = (f"analysis rev {result.get('analysis_revision', 1)} · "
+                f"evidence rev {result.get('evidence_revision', 0)}")
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     esc_path = _html.escape(f["path"])
     esc_name = _html.escape(f["name"])
@@ -262,7 +264,7 @@ code{{background:#212a35;padding:1px 5px;border-radius:3px;font-size:.88em}}
 footer{{margin-top:2.5em;font-size:.82em;color:var(--muted);border-top:1px solid var(--border);padding-top:1em}}
 </style></head><body><div class="page">
 <h1>AkiForensics Report<br><span class="zh" style="font-size:.7em">AI 曲取证报告</span></h1>
-<div class="meta">File 文件: <code>{esc_path}</code><br>Generated 生成: {now} · thresholds 阈值 {v['threshold_version']} · evidence-model v2</div>
+<div class="meta">File 文件: <code>{esc_path}</code><br>Generated 生成: {now} · thresholds 阈值 {v['threshold_version']} · evidence-model v2 · {revision}</div>
 <div class="verdict"><div class="big">{verdict_en}</div>
 <div class="big zh">{verdict_zh}</div>
 <div class="meta" style="margin-top:.6em">Positive basis 正向依据: {basis}<br>
@@ -285,7 +287,7 @@ legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '
 <h2>6 · Method 方法</h2>
 <p>EN · Timing: 30–130 Hz kick isolation, RANSAC tempo/phase scan, linear grid fit, grid-position cross-correlated sub-ms refinement. Spectral: 8192-pt Hann spectrogram, brick-wall cliff detection vs 14–20 kHz reference band. Metadata: streamed FLAC block inventory + STREAMINFO MD5 verify + tag fingerprints. Delivery-chain findings are fused as one correlated vote, never summed.</p>
 <p class="zh">中文 · 时序：30–130 Hz 底鼓分离、RANSAC 速度/相位扫描、线性网格拟合、网格位置互相关亚毫秒精化。频谱：8192 点 Hann 频谱图、以 14–20 kHz 参考频带做砖墙悬崖检测。元数据：流式 FLAC 块清单 + STREAMINFO MD5 校验 + 平台 tag 指纹。交付链发现按相关性合票，不叠加计分。</p>
-<footer>AkiForensics v0.3.2 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
+<footer>AkiForensics v0.3.3 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
 </div></body></html>"""
     out = outdir / "analyst_report.html"
     out.write_text(html, encoding="utf-8")
@@ -320,7 +322,7 @@ code{{background:#212a35;padding:1px 5px;border-radius:3px;font-size:.88em}}
 <h1>Operator Tasks 操作任务单</h1>
 <p class="zh">{ops_head}</p>
 <table><tr><th>Task 任务</th><th>Tool 工具</th><th>Segment 分段 (s)</th><th>Steps 步骤</th><th>Record 记录</th></tr>{ops_rows}</table>
-<footer>AkiForensics operator sheet · 本文件不含分析结论，可整份交给执行人。</footer>
+<footer>AkiForensics operator sheet · 本文件不含分析结论，可整份交给执行人。 · {revision}</footer>
 </div></body></html>"""
     (outdir / "operator_tasks.html").write_text(ops_html, encoding="utf-8")
     return str(out)

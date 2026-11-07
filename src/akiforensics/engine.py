@@ -38,6 +38,8 @@ def analyze_single(path: str | Path, cfg: dict | None = None,
         "spectral": spec,
         "beatgrid": beats,
         "verdict": verd,
+        "analysis_revision": 1,
+        "evidence_revision": 0,
         "channels_meta": {
             "channel_count": int(audio.get("channels") or 1),
             "layout": audio.get("channel_layout") or "unknown",
