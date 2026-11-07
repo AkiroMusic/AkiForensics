@@ -292,40 +292,42 @@ legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '
 </div></body></html>"""
     out = outdir / "analyst_report.html"
     out.write_text(html, encoding="utf-8")
-    # Operator file: task sheets ONLY — no verdict, no engine measurements,
-    # no analyst hypothesis/gap/acceptance wording.
-    ops_rows = ""
+    # Operator file: Markdown task sheets ONLY — no verdict, no engine
+    # measurements, no analyst hypothesis/gap/acceptance wording. MD over
+    # HTML for the operator: linear, readable in any editor, trivially
+    # copy-pasteable as the return template.
+    md = ["# AkiForensics 操作任务单（Operator Tasks）", "",
+          "> 请按步骤独立完成测量并如实记录；不要向 AI 询问任何预期值，",
+          "> 也不要根据既往分析推测目标结果。测完把「记录」区的模板填好连同",
+          "> 截图一起回传（截图设置必须入镜）。",
+          "", "---", ""]
     for t in result.get("manual_tasks", []):
         shown = t.get("operator_view") if "operator_view" in t else t
-        steps = "<br>".join(_html.escape(x) for x in shown.get("steps_zh", []))
-        rec = "<br>".join(f"<code>{_html.escape(k)}</code>: {_html.escape(str(v))}"
-                          for k, v in shown.get("record_fields", {}).items())
-        sel = shown.get("segment", {}).get("selection_rule", "")
-        sel_html = (f"<br><span class='zh'>{_html.escape(sel)}</span>" if sel else "")
-        ops_rows += f"""<tr><td><b>{_html.escape(t['task_id'])}</b></td>
-<td>{_html.escape(t['tool']['name'])}<br><span class="zh">{_html.escape(t['tool']['module'])}</span></td>
-<td>{t['segment']['start_s']} – {t['segment']['end_s']} s{sel_html}</td>
-<td>{steps}</td><td>{rec}</td></tr>"""
-    ops_head = ("请按步骤独立完成测量并如实记录；不要向 AI 询问任何预期值，也不要根据既往分析"
-                "推测目标结果。回传数值表与截图（设置必须入镜）。<br>"
-                "Complete the measurements independently and return the number sheet "
-                "+ screenshots (settings in frame).")
-    ops_html = f"""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
-<title>AkiForensics — Operator Tasks 操作任务单</title><style>
-body{{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#0d1117;color:#d9e1ea;line-height:1.7}}
-.page{{max-width:900px;margin:0 auto;background:#151b23;padding:40px 52px}}
-h1{{font-size:1.4em;border-bottom:3px solid var(--accent,#6cb2ff);padding-bottom:.3em}}
-table{{border-collapse:collapse;width:100%;margin:1em 0;font-size:.9em}}
-th,td{{border:1px solid #2a3441;padding:6px 10px;text-align:left;vertical-align:top}}
-th{{background:#1c242e;color:#a8c7e8}}tr:nth-child(even) td{{background:#181f28}}
-code{{background:#212a35;padding:1px 5px;border-radius:3px;font-size:.88em}}
-.zh{{color:#b9c6d4}}</style></head><body><div class="page">
-<h1>Operator Tasks 操作任务单</h1>
-<p class="zh">{ops_head}</p>
-<table><tr><th>Task 任务</th><th>Tool 工具</th><th>Segment 分段 (s)</th><th>Steps 步骤</th><th>Record 记录</th></tr>{ops_rows}</table>
-<footer>AkiForensics operator sheet · 本文件不含分析结论，可整份交给执行人。 · {revision}</footer>
-</div></body></html>"""
-    (outdir / "operator_tasks.html").write_text(ops_html, encoding="utf-8")
+        md.append(f"## {t['task_id']} · {t['tool']['name']} — {t['tool']['module']}")
+        md.append("")
+        seg = shown.get("segment", t["segment"])
+        md.append(f"- **Segment 分段**: {seg['start_s']} – {seg['end_s']} s"
+                  f"（{seg.get('selection_rule', '按统一规则选取')}）")
+        md.append(f"- **File 文件**: 原始音频（SHA-256 前 8 位 "
+                  f"{(shown.get('file_sha256') or '????????')[:8]}）——禁止使用转码副本")
+        md.append("")
+        md.append("### 步骤")
+        md.append("")
+        for st in shown.get("steps_zh", []):
+            md.append(st)
+        md.append("")
+        md.append("### 记录（回传模板，直接复制填写）")
+        md.append("")
+        md.append("```")
+        for k, v in shown.get("record_fields", {}).items():
+            md.append(f"{k}: {v}")
+        md.append("```")
+        md.append("")
+        md.append("---")
+        md.append("")
+    md.append(f"*AkiForensics operator sheet · 本文件不含分析结论，可整份交给执行人。"
+              f" · {revision}*")
+    (outdir / "operator_tasks.md").write_text(chr(10).join(md), encoding="utf-8")
     return str(out)
 
 

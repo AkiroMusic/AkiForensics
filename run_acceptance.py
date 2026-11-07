@@ -81,7 +81,7 @@ def main() -> int:
         outdir = out / "case"
         outdir.mkdir(parents=True)
         analyst = Path(report.render_html(r, outdir))
-        operator = analyst.with_name("operator_tasks.html")
+        operator = analyst.with_name("operator_tasks.md")
         rec("1. analyze_single -> dual reports",
             "PASS" if (analyst.exists() and operator.exists()) else "FAIL",
             f"verdict={r['verdict']['verdict']} (source: {source.split(' ')[0]})")
@@ -96,11 +96,11 @@ def main() -> int:
         d_h = out / "hypo"
         d_h.mkdir(parents=True, exist_ok=True)
         report.render_html(r_h, d_h)
-        ops_h = (d_h / "operator_tasks.html").read_text(encoding="utf-8")
+        ops_h = (d_h / "operator_tasks.md").read_text(encoding="utf-8")
         hyp_leaks = [x for x in ("cutoff_hz_left", "cutoff_hz_right",
                                  "wall_stable_across_subsegments",
                                  "above_wall_silence") if x in ops_h]
-        indirect_ok = ("<img" not in ops and "<img" not in ops_h
+        indirect_ok = ("data:image" not in ops and "data:image" not in ops_h
                        and src_audio.stem not in ops
                        and not any(w in ops + ops_h for w in
                                    ("可改变", "证据缺口", "alternative_hypotheses")))
@@ -114,7 +114,7 @@ def main() -> int:
 
         # ---- 3. human RX-001 — owner only
         rx = next(t for t in r["manual_tasks"] if t["task_id"] == "RX-001")
-        rec("3. human executes RX-001 via operator_tasks.html", "PENDING-OWNER",
+        rec("3. human executes RX-001 via operator_tasks.md", "PENDING-OWNER",
             "requires a real RX 12 session by the project owner; the return "
             "path below uses a clearly-labeled SIMULATED number sheet")
 
@@ -191,7 +191,7 @@ def main() -> int:
 
         # ---- 10. REAL post-merge re-render + footer revision parity
         m_analyst = Path(report.render_html(merged, out / "merged"))
-        m_ops = m_analyst.with_name("operator_tasks.html")
+        m_ops = m_analyst.with_name("operator_tasks.md")
         a_html = m_analyst.read_text(encoding="utf-8")
         o_html = m_ops.read_text(encoding="utf-8")
         stamp = f"evidence rev {merged['evidence_revision']}"

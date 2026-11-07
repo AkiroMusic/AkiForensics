@@ -1,0 +1,62 @@
+[
+  {
+    "item": "1. analyze_single -> dual reports",
+    "state": "PASS",
+    "detail": "verdict=AI_EVIDENCE_CONVERGENT (source: REAL)"
+  },
+  {
+    "item": "2. operator leak audit (value level: no engine values/verdict)",
+    "state": "PASS",
+    "detail": "leaks: none"
+  },
+  {
+    "item": "2b. operator leak audit (hypothesis level: no target fields)",
+    "state": "PASS",
+    "detail": "field leaks: none; plots/path/analyst-wording: none; residual: segment position visible (documented; random/control design = future work)"
+  },
+  {
+    "item": "3. human executes RX-001 via operator_tasks.md",
+    "state": "PENDING-OWNER",
+    "detail": "requires a real RX 12 session by the project owner; the return path below uses a clearly-labeled SIMULATED number sheet"
+  },
+  {
+    "item": "4. correct instance id + card sha accepted",
+    "state": "PASS",
+    "detail": "instance=R01-RX-001-8c3a20f5"
+  },
+  {
+    "item": "5. identity rejection paths",
+    "state": "PASS",
+    "detail": "['wrong card_sha256: rejected', 'wrong round: rejected', 'missing identity: rejected']"
+  },
+  {
+    "item": "6. merge-submission",
+    "state": "PASS",
+    "detail": "evidence_revision=1"
+  },
+  {
+    "item": "7. indicative never enters authoritative fusion",
+    "state": "PASS",
+    "detail": "summary=agreement_indicative strength=indicative"
+  },
+  {
+    "item": "8. verdict never auto-flipped",
+    "state": "PASS",
+    "detail": "AI_EVIDENCE_CONVERGENT unchanged; recommendation recorded"
+  },
+  {
+    "item": "9. UVR model_unpinned blocks stem returns",
+    "state": "PASS",
+    "detail": "rejected: model_unpinned — stem submissions are BLOCKED until a real model is registered in config/uvr_models.toml (enforcement, not a hint)"
+  },
+  {
+    "item": "10. post-merge dual-report re-render + revision parity",
+    "state": "PASS",
+    "detail": "both footers carry 'evidence rev 1': True"
+  },
+  {
+    "item": "11. corpus structure from versioned template (temp dir)",
+    "state": "PASS",
+    "detail": "human/ai/hybrid/manifests initialized from docs/corpus/ — reproducible on a clean checkout; audio stays local"
+  }
+]

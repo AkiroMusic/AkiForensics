@@ -33,7 +33,7 @@ class HtmlLeakageTests(unittest.TestCase):
         cls.outdir = cls.tmp / "rep"
         cls.outdir.mkdir(parents=True)
         cls.analyst = Path(report.render_html(cls.r, cls.outdir)).read_text("utf-8")
-        cls.operator = (cls.outdir / "operator_tasks.html").read_text("utf-8")
+        cls.operator = (cls.outdir / "operator_tasks.md").read_text("utf-8")
         rx = next(t for t in cls.r["manual_tasks"] if t["task_id"] == "RX-001")
         cls.rx = rx
 
@@ -45,34 +45,34 @@ class HtmlLeakageTests(unittest.TestCase):
 
     def test_both_files_exist(self):
         self.assertTrue((self.outdir / "analyst_report.html").exists())
-        self.assertTrue((self.outdir / "operator_tasks.html").exists())
+        self.assertTrue((self.outdir / "operator_tasks.md").exists())
 
-    def test_operator_html_has_no_verdict(self):
+    def test_operator_md_has_no_verdict(self):
         verdict = self.r["verdict"]["verdict"]
         spaced = verdict.replace("_", " ")
         for leak in (verdict, spaced, "AI 证据收敛", "交付链异常"):
             self.assertNotIn(leak, self.operator)
 
-    def test_operator_html_has_no_engine_measurements(self):
+    def test_operator_md_has_no_engine_measurements(self):
         co = self.r["spectral"]["cutoff_hz"]
         self.assertIsNotNone(co)
         self.assertNotIn(f"{co:.0f}", self.operator)
         self.assertNotIn(f"{co:.0f}", self.operator.replace(",", ""))
 
-    def test_operator_html_has_no_analyst_field_names(self):
+    def test_operator_md_has_no_analyst_field_names(self):
         for name in ("cutoff_hz_left", "cutoff_hz_right",
                      "wall_stable_across_subsegments", "above_wall_silence"):
             self.assertNotIn(name, self.operator)
 
-    def test_operator_html_has_no_analyst_wording(self):
+    def test_operator_md_has_no_analyst_wording(self):
         for phrase in ("确证/推翻", "可改变 spectral 链结论", "有损源指纹",
                        "engine 按检出特征计算"):
             self.assertNotIn(phrase, self.operator)
 
-    def test_operator_html_has_neutral_selection_rule(self):
+    def test_operator_md_has_neutral_selection_rule(self):
         self.assertIn("不向执行人公开", self.operator)
 
-    def test_analyst_html_contains_everything(self):
+    def test_analyst_report_contains_everything(self):
         self.assertIn(self.r["verdict"]["verdict"].replace("_", " "),
                       self.analyst)
         self.assertIn(str(self.rx["task_id"]), self.analyst)
@@ -199,8 +199,8 @@ class DualFileLevelAuditTests(unittest.TestCase):
         d_v.mkdir(); d_h.mkdir()
         report.render_html(cls.r_v, d_v)
         report.render_html(cls.r_h, d_h)
-        cls.ops_v = (d_v / "operator_tasks.html").read_text("utf-8")
-        cls.ops_h = (d_h / "operator_tasks.html").read_text("utf-8")
+        cls.ops_v = (d_v / "operator_tasks.md").read_text("utf-8")
+        cls.ops_h = (d_h / "operator_tasks.md").read_text("utf-8")
 
     @classmethod
     def tearDownClass(cls):
@@ -225,4 +225,4 @@ class DualFileLevelAuditTests(unittest.TestCase):
 
     def test_neither_level_carries_plots_or_paths(self):
         for ops in (self.ops_v, self.ops_h):
-            self.assertNotIn("<img", ops)
+            self.assertNotIn("data:image", ops)
