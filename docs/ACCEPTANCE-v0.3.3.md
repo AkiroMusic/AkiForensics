@@ -1,4 +1,13 @@
-# AkiForensics v0.3.3 — Acceptance Report (v0.3.2 验收执行记录)
+# AkiForensics Acceptance Report
+
+> Current: **v0.3.4 re-run** (round-6 fixes: portable script, real post-merge
+> re-render, corpus from versioned template). Result: 11 PASS / 1 PENDING-OWNER
+> (identical to the v0.3.3 run, plus item 10 now verifies actual re-rendered
+> footers and item 11 runs in a temp dir from the committed template).
+
+---
+
+# v0.3.3 — original acceptance record (v0.3.2 验收执行记录)
 
 Date: 2026-11-07 · Executor: development-side AI · Method: `run_acceptance.py`
 against REAL audio (Suno "Echo in the Prism", commercial demo) + real engine +

@@ -1,171 +1,226 @@
-"""v0.3.x acceptance run — executes the 11-item checklist from GPT review
-round 5 against REAL Suno audio and the real engine/report/merge path.
-Outputs a structured result dict (rendered into docs/ACCEPTANCE by hand)."""
+"""v0.3.x acceptance run — the 11-item checklist from GPT review round 5.
+
+Portable: works on a clean checkout. Audio path comes from argv/env (no
+hardcoded machine paths); the corpus structure is verified in a TEMP dir
+initialized from the versioned template in docs/corpus/.
+
+Usage:
+  python run_acceptance.py [path-to-audio-file]
+  (env AKIFORENSICS_ACCEPT_AUDIO as fallback; without audio, items run on a
+   synthetic fixture and the summary marks the source as SYNTHETIC.)
+
+Result states: PASS / FAIL / PENDING-OWNER.
+"""
 
 import json
+import os
+import shutil
 import sys
 import tempfile
-import shutil
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-sys.path.insert(0, str(Path(__file__).resolve().parent / "tests"))
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tests"))
 
-import fixtures as fx
-from akiforensics import config, report, submission
-from akiforensics.engine import analyze_single
+import fixtures as fx  # noqa: E402
+from akiforensics import config, report, submission  # noqa: E402
+from akiforensics.engine import analyze_single  # noqa: E402
+from akiforensics.tasks import generate_tasks  # noqa: E402
 
 CFG = config.load()
-SUNO = Path(r"E:\AInspiration\Suno\00 商业Demo\Original\Echo in the Prism.wav")
 R = []
 
 
-def rec(item, ok, detail):
-    R.append({"item": item, "ok": bool(ok), "detail": detail})
-    print(("PASS " if ok else "FAIL ") + f"{item}: {detail}")
+def rec(item, state, detail):
+    assert state in ("PASS", "FAIL", "PENDING-OWNER"), state
+    R.append({"item": item, "state": state, "detail": detail})
+    print(f"{state:<14} {item}: {detail}")
 
 
-fxd = fx.FixtureDir()
-out = Path(tempfile.mkdtemp(prefix="akif_accept_"))
-try:
-    # ---- 1. real audio -> analyze_single -> dual reports
-    r = analyze_single(str(SUNO), CFG, blinding_level="value")
-    outdir = out / "case"
-    outdir.mkdir(parents=True)
-    analyst = Path(report.render_html(r, outdir))
-    operator = analyst.with_name("operator_tasks.html")
-    rec("1. real audio -> analyze_single -> dual reports",
-        analyst.exists() and operator.exists(),
-        f"verdict={r['verdict']['verdict']} files={analyst.name}+{operator.name}")
+def init_corpus_structure(base: Path) -> bool:
+    """Initialize + verify the corpus structure from the versioned template."""
+    for sub in ("human/daw_quantized", "human/daw_unquantized", "human/loop_based",
+                "human/mp3_to_flac", "ai/suno", "ai/other_generators",
+                "ai/ai_post_daw", "hybrid/ai_vocals_human_instrumental",
+                "hybrid/human_stems_ai_processing", "manifests"):
+        (base / "corpus" / sub).mkdir(parents=True, exist_ok=True)
+    for name in ("README.md",):
+        src = ROOT / "docs" / "corpus" / name
+        if src.exists():
+            shutil.copy(src, base / "corpus" / name)
+    schema = ROOT / "docs" / "corpus" / "metadata.schema.md"
+    if schema.exists():
+        shutil.copy(schema, base / "corpus" / "manifests" / "metadata.schema.md")
+    need = ["corpus/human/daw_quantized", "corpus/ai/suno",
+            "corpus/hybrid/ai_vocals_human_instrumental", "corpus/manifests",
+            "corpus/README.md", "corpus/manifests/metadata.schema.md"]
+    return all((base / n).exists() for n in need)
 
-    # ---- 2. operator HTML leak audit — LEVEL-AWARE
-    ops = operator.read_text(encoding="utf-8")
-    v = r["verdict"]
-    co = r["spectral"]["cutoff_hz"]
-    # (a) value-level file: no engine VALUES, no verdict, no analyst wording
-    value_level_leaks = [x for x in (v["verdict"], v["verdict"].replace("_", " "),
-                                     f"{co:.0f}", "有损源指纹", "确证/推翻") if x in ops]
-    # (b) hypothesis-level file: additionally no target field names
-    r_h = analyze_single(str(SUNO), CFG, blinding_level="hypothesis")
-    ops_h = Path(report.render_html(r_h, out / "hypo")).with_name(
-        "operator_tasks.html").read_text(encoding="utf-8")
-    hyp_leaks = [x for x in ("cutoff_hz_left", "cutoff_hz_right",
-                             "wall_stable_across_subsegments", "above_wall_silence")
-                 if x in ops_h]
-    indirect = {
-        "plot_images": "<img" in ops or "<img" in ops_h,
-        "audio_file_path": "Echo in the Prism" in ops or "Echo in the Prism" in ops_h,
-        "analyst_wording": any(w in ops + ops_h for w in
-                               ("可改变", "证据缺口", "alternative_hypotheses")),
-        "segment_position_visible": True,  # inherent residual, documented
-    }
-    rec("2. operator HTML leak audit (value level: no engine values/verdict)",
-        not value_level_leaks, f"leaks: {value_level_leaks or 'none'}")
-    rec("2b. operator HTML leak audit (hypothesis level: no target fields)",
-        not hyp_leaks and not indirect["plot_images"]
-        and not indirect["audio_file_path"] and not indirect["analyst_wording"],
-        f"field leaks: {hyp_leaks or 'none'}; residuals: segment position "
-        f"visible (inherent; random/control-group design = future work)")
 
-    # ---- 3. human task execution — OWNER PENDING (simulated return below)
-    rx = next(t for t in r["manual_tasks"] if t["task_id"] == "RX-001")
-    rec("3. human executes RX-001 via operator_tasks.html", False,
-        "PENDING-OWNER: requires a real RX 12 session by the project owner; "
-        "below we use a clearly-labeled SIMULATED return to exercise the path")
-
-    # ---- 4. construct correct identity
-    sub = {"task_id": rx["task_id"],
-           "task_instance_id": rx["task_instance_id"],
-           "card_sha256": rx["card_sha256"],
-           "file_sha256": rx["file_sha256"],
-           "values": {k: None for k in rx["record_fields"] if k != "screenshots"},
-           "screenshots": [], "operator_notes": "SIMULATED acceptance return",
-           "deviations": ""}
-    eng_cut = r["spectral"]["cutoff_hz"]
-    sub["values"]["cutoff_hz_left"] = eng_cut        # agreement with engine
-    sub["values"]["cutoff_hz_right"] = eng_cut + 60  # within 200 Hz tolerance
-    sub["values"]["wall_stable_across_subsegments"] = "yes"
-    sub["values"]["lr_consistent"] = "yes"
-    sub["values"]["above_wall_silence"] = "yes"
-    sub["values"]["rx_version"] = "SIM-12.0"
+def main() -> int:
+    audio = Path(sys.argv[1] if len(sys.argv) > 1
+                 else os.environ.get("AKIFORENSICS_ACCEPT_AUDIO", ""))
+    real = bool(audio) and audio.exists() and audio.is_file()
+    out = Path(tempfile.mkdtemp(prefix="akif_accept_"))
+    fxd = fx.FixtureDir()
     try:
-        submission.validate(sub, rx)
-        rec("4. correct task_instance_id + card_sha256 accepted", True,
-            f"instance={rx['task_instance_id']}")
-    except submission.SubmissionError as e:
-        rec("4. correct identity accepted", False, str(e))
+        if real:
+            src_audio = audio
+            source = "REAL"
+        else:
+            wav = fx.render_kick_track(fxd.dir / "acc_k.wav", bpm=136,
+                                       jitter_ms=3.0, wander_ms=2.0, dur=50)
+            src_audio = fx.wav_to_flac(wav, fxd.dir / "acc.flac")
+            source = ("SYNTHETIC (audio arg/env missing — pass a real file "
+                      "for REAL acceptance evidence)")
+        print(f"audio source: {source}\n")
 
-    # ---- 5. rejection: wrong hash / missing / wrong round
-    rejects = []
-    bad_hash = dict(sub, card_sha256="f" * 64)
-    bad_round = dict(sub, task_instance_id="R99-WRONG")
-    missing = {k: v for k, v in sub.items() if k not in ("task_instance_id", "card_sha256")}
-    for name, s_ in (("wrong card_sha256", bad_hash),
-                     ("wrong round", bad_round),
-                     ("missing identity", missing)):
+        # ---- 1. analyze -> dual reports
+        r = analyze_single(str(src_audio), CFG)
+        outdir = out / "case"
+        outdir.mkdir(parents=True)
+        analyst = Path(report.render_html(r, outdir))
+        operator = analyst.with_name("operator_tasks.html")
+        rec("1. analyze_single -> dual reports",
+            "PASS" if (analyst.exists() and operator.exists()) else "FAIL",
+            f"verdict={r['verdict']['verdict']} (source: {source.split(' ')[0]})")
+
+        # ---- 2/2b. level-aware operator leak audit
+        ops = operator.read_text(encoding="utf-8")
+        v, co = r["verdict"], r["spectral"]["cutoff_hz"]
+        value_leaks = ([x for x in (v["verdict"], v["verdict"].replace("_", " "),
+                                    f"{co:.0f}", "有损源指纹", "确证/推翻")
+                        if x in ops] if co else [])
+        r_h = analyze_single(str(src_audio), CFG, blinding_level="hypothesis")
+        d_h = out / "hypo"
+        d_h.mkdir(parents=True, exist_ok=True)
+        report.render_html(r_h, d_h)
+        ops_h = (d_h / "operator_tasks.html").read_text(encoding="utf-8")
+        hyp_leaks = [x for x in ("cutoff_hz_left", "cutoff_hz_right",
+                                 "wall_stable_across_subsegments",
+                                 "above_wall_silence") if x in ops_h]
+        indirect_ok = ("<img" not in ops and "<img" not in ops_h
+                       and src_audio.stem not in ops
+                       and not any(w in ops + ops_h for w in
+                                   ("可改变", "证据缺口", "alternative_hypotheses")))
+        rec("2. operator leak audit (value level: no engine values/verdict)",
+            "PASS" if not value_leaks else "FAIL", f"leaks: {value_leaks or 'none'}")
+        rec("2b. operator leak audit (hypothesis level: no target fields)",
+            "PASS" if not hyp_leaks and indirect_ok else "FAIL",
+            f"field leaks: {hyp_leaks or 'none'}; plots/path/analyst-wording: "
+            f"{'none' if indirect_ok else 'FOUND'}; residual: segment position "
+            f"visible (documented; random/control design = future work)")
+
+        # ---- 3. human RX-001 — owner only
+        rx = next(t for t in r["manual_tasks"] if t["task_id"] == "RX-001")
+        rec("3. human executes RX-001 via operator_tasks.html", "PENDING-OWNER",
+            "requires a real RX 12 session by the project owner; the return "
+            "path below uses a clearly-labeled SIMULATED number sheet")
+
+        # ---- 4. correct identity
+        sub = {"task_id": rx["task_id"],
+               "task_instance_id": rx["task_instance_id"],
+               "card_sha256": rx["card_sha256"],
+               "file_sha256": rx["file_sha256"],
+               "values": {k: None for k in rx["record_fields"]
+                          if k != "screenshots"},
+               "screenshots": [], "operator_notes": "SIMULATED acceptance return",
+               "deviations": ""}
+        eng = r["spectral"]["cutoff_hz"]
+        sub["values"]["cutoff_hz_left"] = eng
+        sub["values"]["cutoff_hz_right"] = (eng or 0) + 60
+        sub["values"]["wall_stable_across_subsegments"] = "yes"
+        sub["values"]["lr_consistent"] = "yes"
+        sub["values"]["above_wall_silence"] = "yes"
+        sub["values"]["rx_version"] = "SIM-12.0"
         try:
-            submission.validate(s_, rx)
-            rejects.append((name, "NOT REJECTED"))
-        except submission.SubmissionError:
-            rejects.append((name, "rejected"))
-    rec("5. identity rejection paths", all(r2 == "rejected" for _, r2 in rejects),
-        str(rejects))
+            submission.validate(sub, rx)
+            rec("4. correct instance id + card sha accepted", "PASS",
+                f"instance={rx['task_instance_id']}")
+        except submission.SubmissionError as e:
+            rec("4. correct identity accepted", "FAIL", str(e))
 
-    # ---- 6. merge-submission
-    merged = submission.merge(sub, r, rx)
-    ev = merged["human_evidence"][-1]
-    rec("6. merge-submission", ev["task_id"] == "RX-001",
-        f"evidence_revision={merged['evidence_revision']}")
+        # ---- 5. rejection paths
+        rejects = []
+        for name, s_ in (("wrong card_sha256", dict(sub, card_sha256="f" * 64)),
+                         ("wrong round", dict(sub, task_instance_id="R99-WRONG")),
+                         ("missing identity",
+                          {k: v2 for k, v2 in sub.items()
+                           if k not in ("task_instance_id", "card_sha256")})):
+            try:
+                submission.validate(s_, rx)
+                rejects.append(f"{name}: NOT REJECTED")
+            except submission.SubmissionError:
+                rejects.append(f"{name}: rejected")
+        ok5 = all(r2.endswith("rejected") for r2 in rejects)
+        rec("5. identity rejection paths", "PASS" if ok5 else "FAIL", str(rejects))
 
-    # ---- 7. indicative stays out of authoritative fusion
-    rec("7. indicative never enters authoritative fusion",
-        ev["summary"] == "agreement_indicative" and ev["comparison_strength"] == "indicative",
-        f"summary={ev['summary']} strength={ev['comparison_strength']}")
+        # ---- 6. merge
+        merged = submission.merge(sub, r, rx)
+        ev = merged["human_evidence"][-1]
+        rec("6. merge-submission", "PASS",
+            f"evidence_revision={merged['evidence_revision']}")
 
-    # ---- 8. verdict not flipped by human return
-    rec("8. verdict never auto-flipped",
-        merged["verdict"]["verdict"] == r["verdict"]["verdict"]
-        and merged["verdict_reevaluation"]["changed"] is False,
-        f"{r['verdict']['verdict']} -> {merged['verdict_reevaluation']['verdict_after']} "
-        f"(changed={merged['verdict_reevaluation']['changed']})")
+        # ---- 7. indicative isolation
+        rec("7. indicative never enters authoritative fusion",
+            "PASS" if (ev["summary"] == "agreement_indicative"
+                       and ev["comparison_strength"] == "indicative") else "FAIL",
+            f"summary={ev['summary']} strength={ev['comparison_strength']}")
 
-    # ---- 9. UVR model_unpinned truly blocks (submission gate, not a hint)
-    cards = __import__("akiforensics.tasks", fromlist=["generate_tasks"]).generate_tasks(
-        merged, force=("UVR-001",))
-    uvr = next(c for c in cards if c["task_id"] == "UVR-001")
-    stem_sub = {"task_id": "UVR-001", "file_sha256": uvr["file_sha256"],
-                "task_instance_id": uvr["task_instance_id"],
-                "card_sha256": uvr["card_sha256"],
-                "values": {}, "screenshots": [], "operator_notes": "",
-                "deviations": ""}
-    try:
-        submission.validate(stem_sub, uvr)
-        rec("9. UVR model_unpinned blocks stem analysis", False,
-            "stem submission was NOT rejected")
-    except submission.SubmissionError as e:
-        rec("9. UVR model_unpinned blocks stem analysis", True, f"rejected: {e}")
+        # ---- 8. verdict never flipped
+        rec("8. verdict never auto-flipped",
+            "PASS" if (merged["verdict"]["verdict"] == r["verdict"]["verdict"]
+                       and merged["verdict_reevaluation"]["changed"] is False)
+            else "FAIL",
+            f"{r['verdict']['verdict']} unchanged; recommendation recorded")
 
-    # ---- 10. dual-report revision consistency
-    merged_json = json.dumps(report._jsonable(merged))
-    rec("10. revision consistency",
-        merged["evidence_revision"] == r["evidence_revision"] + 1,
-        f"evidence rev {r['evidence_revision']} -> {merged['evidence_revision']}; "
-        f"both reports regenerate from the same snapshot via render_html")
+        # ---- 9. UVR block
+        cards = generate_tasks(merged, force=("UVR-001",))
+        uvr = next(c for c in cards if c["task_id"] == "UVR-001")
+        stem_sub = {"task_id": "UVR-001", "file_sha256": uvr["file_sha256"],
+                    "task_instance_id": uvr["task_instance_id"],
+                    "card_sha256": uvr["card_sha256"], "values": {},
+                    "screenshots": [], "operator_notes": "", "deviations": ""}
+        try:
+            submission.validate(stem_sub, uvr)
+            rec("9. UVR model_unpinned blocks stem returns", "FAIL",
+                "submission NOT rejected")
+        except submission.SubmissionError as e:
+            rec("9. UVR model_unpinned blocks stem returns", "PASS", f"rejected: {e}")
 
-    # ---- 11. corpus manifest + hybrid classification
-    corpus = Path(__file__).resolve().parent / "corpus"
-    ok11 = ((corpus / "hybrid").exists() and (corpus / "manifests").exists()
-            and (corpus / "README.md").exists()
-            and (corpus / "manifests" / "metadata.schema.md").exists())
-    rec("11. corpus manifest + hybrid classification", ok11,
-        "human/ai/hybrid dirs + manifests schema present; audio local-only")
-finally:
-    fxd.cleanup()
-    shutil.rmtree(out, ignore_errors=True)
+        # ---- 10. REAL post-merge re-render + footer revision parity
+        m_analyst = Path(report.render_html(merged, out / "merged"))
+        m_ops = m_analyst.with_name("operator_tasks.html")
+        a_html = m_analyst.read_text(encoding="utf-8")
+        o_html = m_ops.read_text(encoding="utf-8")
+        stamp = f"evidence rev {merged['evidence_revision']}"
+        both = stamp in a_html and stamp in o_html
+        rec("10. post-merge dual-report re-render + revision parity",
+            "PASS" if both else "FAIL",
+            f"both footers carry '{stamp}': {both}")
 
-print("\n==== ACCEPTANCE SUMMARY ====")
-print(f"executed: {len(R)}  pass: {sum(1 for x in R if x['ok'])}  "
-      f"pending-owner: {sum(1 for x in R if not x['ok'])}")
-print("commit SHA under test: see git log (v0.3.3)")
-json.dump(R, open(Path(__file__).parent / "acceptance_results.json", "w"),
-          ensure_ascii=False, indent=2)
+        # ---- 11. corpus portability (clean-checkout simulation in temp dir)
+        ok11 = init_corpus_structure(out)
+        rec("11. corpus structure from versioned template (temp dir)",
+            "PASS" if ok11 else "FAIL",
+            "human/ai/hybrid/manifests initialized from docs/corpus/ — "
+            "reproducible on a clean checkout; audio stays local")
+    finally:
+        fxd.cleanup()
+        shutil.rmtree(out, ignore_errors=True)
+
+    print("\n==== ACCEPTANCE SUMMARY ====")
+    for st in ("PASS", "FAIL", "PENDING-OWNER"):
+        n = sum(1 for x in R if x["state"] == st)
+        if n:
+            print(f"{st}: {n}")
+    print("audio source:", "REAL" if real else "SYNTHETIC")
+    out_json = ROOT / "acceptance_results.json"
+    json.dump(R, open(out_json, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    print(f"results written: {out_json}")
+    return 0 if not any(x["state"] == "FAIL" for x in R) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

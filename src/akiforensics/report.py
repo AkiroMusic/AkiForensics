@@ -97,7 +97,8 @@ _VERDICT_ZH = {
     "AI_EVIDENCE_CONVERGENT": "AI 证据收敛（时序变异 + 交付链异常；替代假设已列明，听检门已排队）",
     "LIKELY_AI": "倾向 AI 生成（音频内在时序证据；替代假设已列明）",
     "DELIVERY_CHAIN_ANOMALY": "仅交付链异常（无时序证据，不判来源）",
-    "LIKELY_HUMAN": "倾向人类制作（制作一致性证据，非作者身份证明）",
+    "FILE_INTEGRITY_ANOMALY": "仅文件完整性异常（损坏/编辑可能，非转码证据，不作来源声明）",
+    "QUANTIZED_PRODUCTION_CONSISTENT": "量化制作一致（制作一致性证据，非作者身份证明）",
     "INCONCLUSIVE": "证据不足，无法判定",
 }
 _LEG_ZH = {
@@ -264,13 +265,13 @@ code{{background:#212a35;padding:1px 5px;border-radius:3px;font-size:.88em}}
 footer{{margin-top:2.5em;font-size:.82em;color:var(--muted);border-top:1px solid var(--border);padding-top:1em}}
 </style></head><body><div class="page">
 <h1>AkiForensics Report<br><span class="zh" style="font-size:.7em">AI 曲取证报告</span></h1>
-<div class="meta">File 文件: <code>{esc_path}</code><br>Generated 生成: {now} · thresholds 阈值 {v['threshold_version']} · evidence-model v2 · {revision}</div>
+<div class="meta">File 文件: <code>{esc_path}</code><br>Generated 生成: {now} · thresholds 阈值 {v['threshold_version']} · evidence-model v3 · {revision}</div>
 <div class="verdict"><div class="big">{verdict_en}</div>
 <div class="big zh">{verdict_zh}</div>
 <div class="meta" style="margin-top:.6em">Positive basis 正向依据: {basis}<br>
 Alternatives standing 替代假设: {alts if alts else "none（当前证据组合下无已建模替代解释）"}<br>
 legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '')} · spectral 频谱={_LEG_ZH.get(v['legs']['spectral']['verdict'], '')} · metadata 元数据={_LEG_ZH.get(v['legs']['metadata']['verdict'], '')}</div></div>
-<div class="warn">{v['disclaimer']}<br><span class="zh">阈值 v0-n1：基于单一确认案例校准。判定为证据加权结论，非 ground truth。无异常 ≠ 人类特征。</span></div>
+<div class="warn">{v['disclaimer']}<br><span class="zh">阈值版本以 config/thresholds.toml 为唯一事实源：基于单一确认案例 + 小规模真实 AI 参考集校准（人类侧物理先验）。判定为证据加权结论，非 ground truth。无异常 ≠ 人类特征。</span></div>
 <h2>1 · Timing forensics 时序取证 <span style="color:#8a97a6;font-size:.85em">(measurement 时序测量，来源归因见解读行)</span></h2>
 <table><tr><th>Metric 指标</th><th>Value 值</th></tr>{timing_rows}</table>
 <h2>2 · Spectral forensics 频谱取证 <span style="color:#8a97a6;font-size:.85em">(delivery chain 交付链)</span></h2>
@@ -287,7 +288,7 @@ legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '
 <h2>6 · Method 方法</h2>
 <p>EN · Timing: 30–130 Hz kick isolation, RANSAC tempo/phase scan, linear grid fit, grid-position cross-correlated sub-ms refinement. Spectral: 8192-pt Hann spectrogram, brick-wall cliff detection vs 14–20 kHz reference band. Metadata: streamed FLAC block inventory + STREAMINFO MD5 verify + tag fingerprints. Delivery-chain findings are fused as one correlated vote, never summed.</p>
 <p class="zh">中文 · 时序：30–130 Hz 底鼓分离、RANSAC 速度/相位扫描、线性网格拟合、网格位置互相关亚毫秒精化。频谱：8192 点 Hann 频谱图、以 14–20 kHz 参考频带做砖墙悬崖检测。元数据：流式 FLAC 块清单 + STREAMINFO MD5 校验 + 平台 tag 指纹。交付链发现按相关性合票，不叠加计分。</p>
-<footer>AkiForensics v0.3.3 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
+<footer>AkiForensics v0.3.4 · evidence report only; final judgment (incl. listening check) belongs to the recipient. 仅陈述技术证据；最终判定（含试听）由使用者作出。</footer>
 </div></body></html>"""
     out = outdir / "analyst_report.html"
     out.write_text(html, encoding="utf-8")
@@ -353,7 +354,7 @@ def write_batch_summary(results: list[dict], outdir: str | Path) -> str:
     rows = ""
     for r in results:
         vd = r["verdict"]["verdict"]
-        cls = "bad" if "AI" in vd else ("good" if vd == "LIKELY_HUMAN" else "")
+        cls = "bad" if "AI" in vd else ("good" if vd == "QUANTIZED_PRODUCTION_CONSISTENT" else "")
         rows += (f"<tr><td>{_html.escape(r['file']['name'])}</td>"
                  f"<td class='{cls}'>{_html.escape(vd)}<br><span class='zh'>{_VERDICT_ZH.get(vd, '')}</span></td>"
                  f"<td>{_html.escape(r['verdict']['legs']['beatgrid']['verdict'])}</td>"

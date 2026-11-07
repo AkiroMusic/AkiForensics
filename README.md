@@ -20,9 +20,9 @@ Three analytical modules, grouped into evidence families (timing is audio-intrin
 | **B · Spectral fingerprint** 频谱 | Brick-wall cutoff + HF band variability inside a nominally lossless container ⇒ lossy-source fingerprint (e.g. LAME 320's 20.5 kHz wall; observed Suno originals cluster at ~20.1 kHz, n=7). | Delivery-chain evidence |
 | **C · Metadata chain** 元数据 | FLAC block inventory, STREAMINFO MD5 integrity, cover MIME mismatches, platform farm tags (KuGou etc.), decoder errors. | Circumstantial |
 
-Verdicts: `AI_EVIDENCE_CONVERGENT` / `LIKELY_AI` / `LIKELY_HUMAN` / `DELIVERY_CHAIN_ANOMALY` / `INCONCLUSIVE` — every source-leaning verdict carries mandatory `alternative_hypotheses` disclosure. Design rules (docs/evidence-model.md): legs report measurements, not attributions; delivery-chain findings fuse as ONE correlated vote; absence of anomalies is never positive evidence. The timing leg is genre-gated: tracks without a steady kick grid report `N/A` for leg A instead of a guess.
+Verdicts: `AI_EVIDENCE_CONVERGENT` / `LIKELY_AI` / `QUANTIZED_PRODUCTION_CONSISTENT` / `DELIVERY_CHAIN_ANOMALY` / `FILE_INTEGRITY_ANOMALY` / `INCONCLUSIVE` — every source-leaning verdict carries mandatory `alternative_hypotheses` disclosure. Design rules (docs/evidence-model.md): legs report measurements, not attributions; delivery-chain findings fuse as ONE correlated vote; absence of anomalies is never positive evidence. The timing leg is genre-gated: tracks without a steady kick grid report `N/A` for leg A instead of a guess.
 
-判定等级：`AI_EVIDENCE_CONVERGENT`（AI 证据收敛）/ `LIKELY_AI`（倾向 AI）/ `LIKELY_HUMAN`（倾向人类）/ `DELIVERY_CHAIN_ANOMALY`（仅交付链异常，归因保留）/ `INCONCLUSIVE`（证据不足）。设计原则（docs/evidence-model.md）：证据链只报测量不作归因；交付链发现按相关性合票；无异常永远不是正向证据。时序链按曲风门控：无稳定底鼓网格的曲子 A 链报 `N/A`，不硬判。
+判定等级：`AI_EVIDENCE_CONVERGENT`（AI 证据收敛）/ `LIKELY_AI`（倾向 AI）/ `QUANTIZED_PRODUCTION_CONSISTENT`（量化制作一致）/ `DELIVERY_CHAIN_ANOMALY`（仅交付链异常，归因保留）/ `INCONCLUSIVE`（证据不足）。设计原则（docs/evidence-model.md）：证据链只报测量不作归因；交付链发现按相关性合票；无异常永远不是正向证据。时序链按曲风门控：无稳定底鼓网格的曲子 A 链报 `N/A`，不硬判。
 
 ## Human-in-the-loop · 人工在环
 
