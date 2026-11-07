@@ -22,6 +22,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 
 # Numeric comparison tolerances per task (card acceptance criteria in ms/Hz).
@@ -69,7 +70,11 @@ def validate(submission: dict, card: dict) -> None:
              "(protocol/segment changed between rounds)")
     values = submission.get("values")
     _require(isinstance(values, dict), "missing 'values' object")
-    for k in card["record_fields"]:
+    expected = card.get("record_fields", {})
+    if card.get("operator_view"):
+        # hypothesis-blinded card: the operator filled the GENERIC schema
+        expected = card["operator_view"].get("record_fields", expected)
+    for k in expected:
         if k == "screenshots":
             continue
         _require(k in values, f"missing record field '{k}' (null is a valid value)")
@@ -99,7 +104,16 @@ def merge(submission: dict, analysis: dict, card: dict) -> dict:
     engine_card = next((t for t in analysis.get("manual_tasks", [])
                         if t["task_id"] == card["task_id"]), card)
     comparisons = []
-    for k, human_v in values.items():
+    hypothesis_returned = card.get("operator_view") is not None
+    for k, human_v in list(values.items()):
+        if k == "screenshots" or not isinstance(human_v, (int, float)) or isinstance(human_v, bool):
+            continue
+        if hypothesis_returned:
+            # hypothesis-blinded returns use generic field names: no
+            # mechanical name-matched comparison exists — the session AI
+            # applies the card's acceptance criteria to the returned
+            # boundary list instead.
+            continue
         if k == "screenshots" or not isinstance(human_v, (int, float)) or \
                 isinstance(human_v, bool):
             continue
@@ -169,7 +183,8 @@ _INTERPRETATIONS = {
                                 "指纹方向获得独立方法学佐证，置信提升一档",
         "contradiction_indicative": "人工测量与引擎不一致：两值均保留，需换段/换工具"
                                     "复核（矛盾不裁决，只加证）",
-        "recorded": "人工测量已入库（含 null 合法值）",
+        "recorded": "人工边界清单已入库（全盲模式：与引擎 mono 截止的对照由会话 AI "
+                    "按卡面验收标准执行，结论指示性）",
     },
     "RX-002": {"recorded": "kick 波形一致性作为制作方式辅助上下文（中性线索）"},
     "DAW-001": {"recorded": "结构化听检为主观证据，永不单独定来源；≥2 项人声 yes 时建议 UVR-001"},
@@ -196,4 +211,75 @@ def reevaluate(evidence: dict, analysis: dict) -> dict:
         "note": ("evidence ingestion only — verdict changes require the session "
                  "AI to apply the card's acceptance criteria across ALL evidence, "
                  "or a corpus-calibrated rule update"),
+    }
+
+
+_BOUNDARY_LINE = re.compile(r"^(\d+(?:\.\d+)?)\s+(.+)$")
+
+
+def parse_operator_md(md_text: str, task_id: str | None = None) -> dict:
+    """Extract filled record fields from an operator MD sheet.
+
+    Field lines look like 'key ='; the value is every following line until
+    the next field line or a code-fence end. Comment lines (# ...) are
+    hints and ignored. 'none' -> None; 'freq note' lines -> {'freq_hz',
+    'note'} dicts; anything else joins into a string. With task_id, only
+    that task's `## ` section is parsed (sheets contain several tasks).
+    """
+    values: dict = {}
+    current, buf = None, []
+
+    def flush():
+        nonlocal current, buf
+        if current is None:
+            return
+        lines = [l.strip() for l in buf
+                 if l.strip() and not l.strip().startswith("#")]
+        if not lines or (len(lines) == 1 and lines[0].lower() == "none"):
+            values[current] = None
+        elif all(_BOUNDARY_LINE.match(l) for l in lines):
+            values[current] = [
+                {"freq_hz": float(m.group(1)), "note": m.group(2)}
+                for m in map(_BOUNDARY_LINE.match, lines)]
+        else:
+            values[current] = " ".join(lines)
+        current, buf = None, []
+
+    text = md_text
+    if task_id:
+        sections = re.split(r"^## ", md_text, flags=re.M)
+        sect = next((s_ for s_ in sections if s_.startswith(task_id)), None)
+        if sect is None:
+            raise SubmissionError(f"operator sheet has no section for {task_id}")
+        text = sect
+    for line in text.splitlines():
+        m = re.match(r"^(\w+)\s*=\s*(.*)$", line)
+        if m and not line.strip().startswith("#"):
+            flush()
+            current = m.group(1)
+            if m.group(2).strip():
+                buf.append(m.group(2))
+            continue
+        if line.strip().startswith("```"):
+            flush()
+            continue
+        if current is not None:
+            buf.append(line)
+    flush()
+    return values
+
+
+def submission_from_operator_md(md_text: str, card: dict) -> dict:
+    """Build a complete submission from a filled operator sheet: identity
+    comes from the card, values from the parsed blanks (scoped to the
+    card's own task section)."""
+    return {
+        "task_id": card["task_id"],
+        "task_instance_id": card["task_instance_id"],
+        "card_sha256": card["card_sha256"],
+        "file_sha256": card["file_sha256"],
+        "values": parse_operator_md(md_text, card["task_id"]),
+        "screenshots": [],
+        "operator_notes": "filled in operator_tasks.md",
+        "deviations": "",
     }

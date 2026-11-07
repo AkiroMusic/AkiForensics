@@ -316,11 +316,13 @@ legs 证据链: beatgrid 时序={_LEG_ZH.get(v['legs']['beatgrid']['verdict'], '
         for st in shown.get("steps_zh", []):
             md.append(st)
         md.append("")
-        md.append("### 记录（回传模板，直接复制填写）")
+        md.append("### 记录（直接在下面填写；填完保存本文件，然后告诉 AI「已填好」）")
         md.append("")
         md.append("```")
         for k, v in shown.get("record_fields", {}).items():
-            md.append(f"{k}: {v}")
+            md.append(f"# {k} —— {v}")
+            md.append(f"{k} =")
+            md.append("")
         md.append("```")
         md.append("")
         md.append("---")

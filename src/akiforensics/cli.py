@@ -55,11 +55,25 @@ def cmd_analyze(args) -> int:
 
 
 def cmd_merge_submission(args) -> int:
-    """Merge a returned human task sheet into an existing report.json."""
+    """Merge a returned human task sheet into an existing report.json.
+
+    Two input modes: a structured submission JSON, or a FILLED operator MD
+    sheet (--operator-md) — the common path; identity comes from the card.
+    """
     from . import submission
     rpath = Path(args.report)
     analysis = json.loads(rpath.read_text(encoding="utf-8"))
-    sub = submission.load_submission(args.submission)
+    if args.operator_md:
+        md_text = Path(args.operator_md).read_text(encoding="utf-8")
+        task_id = args.task_id
+        card = next((t for t in analysis.get("manual_tasks", [])
+                     if t["task_id"] == task_id), None)
+        if card is None:
+            print(f"error: task {task_id} not in this report's manual_tasks")
+            return 2
+        sub = submission.submission_from_operator_md(md_text, card)
+    else:
+        sub = submission.load_submission(args.submission)
     card = None
     for t in analysis.get("manual_tasks", []):
         if sub.get("task_instance_id"):
@@ -120,7 +134,11 @@ def main(argv=None) -> int:
     m = sub.add_parser("merge-submission",
                        help="merge a returned human task sheet into report.json")
     m.add_argument("report", help="path to report.json")
-    m.add_argument("submission", help="path to the returned submission JSON")
+    m.add_argument("submission", nargs="?", help="path to the submission JSON")
+    m.add_argument("--operator-md",
+                   help="path to a FILLED operator_tasks.md (values are parsed "
+                        "from the blanks; --task-id required)")
+    m.add_argument("--task-id", help="task id when using --operator-md")
     m.set_defaults(func=cmd_merge_submission)
 
     c = sub.add_parser("calibrate",
